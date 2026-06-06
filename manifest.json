@@ -1,0 +1,7 @@
+{
+  "name": "PICA — Register Set",
+  "author": "Withpica Ltd",
+  "entry": "dist/extension.js",
+  "version": "0.1.0",
+  "minimumApiVersion": "1.0.0"
+}
