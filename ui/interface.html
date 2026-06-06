@@ -1,0 +1,98 @@
+<!doctype html>
+<!-- Copyright (c) 2024-2026 Withpica Ltd. All rights reserved. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { --bg:#0A0A0A; --line:rgba(255,255,255,.10); --fg:#EDEDED; --muted:rgba(255,255,255,.45); --copper:#B87333; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; padding:16px; }
+      h1 { font-size:14px; font-weight:400; letter-spacing:.04em; margin:0 0 4px; }
+      .summary { color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; margin-bottom:14px; }
+      label { display:block; text-transform:uppercase; font-size:10px; letter-spacing:.08em; color:var(--muted); margin:10px 0 4px; }
+      input, select { width:100%; background:transparent; border:1px solid var(--line); color:var(--fg); padding:7px 8px; font:13px ui-monospace,Menlo,monospace; }
+      input:focus, select:focus { outline:none; border-color:var(--copper); }
+      .row { display:flex; gap:10px; }
+      .row > div { flex:1; }
+      .actions { display:flex; gap:8px; margin-top:18px; }
+      button { flex:1; padding:9px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; font-size:12px; letter-spacing:.04em; }
+      button.primary { border-color:var(--copper); color:var(--copper); }
+      button:disabled { opacity:.4; cursor:not-allowed; }
+      .err { color:#f87171; font-size:11px; min-height:14px; margin-top:8px; font-family:ui-monospace,Menlo,monospace; }
+    </style>
+  </head>
+  <body>
+    <h1>register this set in pica</h1>
+    <div class="summary" id="summary"></div>
+
+    <label for="title">title *</label>
+    <input id="title" autocomplete="off" placeholder="name this work" />
+
+    <label for="artist">artist name *</label>
+    <input id="artist" autocomplete="off" placeholder="primary artist" />
+
+    <div class="row">
+      <div>
+        <label for="workType">work type</label>
+        <select id="workType">
+          <option value="song">song</option>
+          <option value="instrumental">instrumental</option>
+          <option value="library">library</option>
+          <option value="demo">demo</option>
+          <option value="sample">sample</option>
+        </select>
+      </div>
+      <div>
+        <label for="key">key</label>
+        <input id="key" autocomplete="off" />
+      </div>
+    </div>
+
+    <div class="err" id="err"></div>
+    <div class="actions">
+      <button id="cancel">cancel</button>
+      <button id="register" class="primary">register</button>
+    </div>
+
+    <script>
+      // The host injects the prefill object as the URL hash (set by extension.ts).
+      // Shape: { summary, key, workType }.
+      var prefill = {};
+      try { prefill = JSON.parse(decodeURIComponent(location.hash.slice(1) || "")) || {}; } catch (e) {}
+
+      document.getElementById("summary").textContent = prefill.summary || "";
+      if (prefill.key) document.getElementById("key").value = prefill.key;
+      if (prefill.workType) document.getElementById("workType").value = prefill.workType;
+
+      function post(resultObj) {
+        var msg = { method: "close_and_send", params: [JSON.stringify(resultObj)] };
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.live) {
+          window.webkit.messageHandlers.live.postMessage(msg); // macOS
+        } else if (window.chrome && window.chrome.webview) {
+          window.chrome.webview.postMessage(msg); // Windows
+        }
+      }
+
+      document.getElementById("cancel").addEventListener("click", function () {
+        post({ cancelled: true });
+      });
+
+      document.getElementById("register").addEventListener("click", function () {
+        var title = document.getElementById("title").value.trim();
+        var artist = document.getElementById("artist").value.trim();
+        var err = document.getElementById("err");
+        if (!title || !artist) {
+          err.textContent = "title and artist name are required";
+          return;
+        }
+        post({
+          cancelled: false,
+          title: title,
+          artistName: artist,
+          workType: document.getElementById("workType").value,
+          key: document.getElementById("key").value.trim(),
+        });
+      });
+    </script>
+  </body>
+</html>
