@@ -57,8 +57,10 @@
     <script>
       // The host injects the prefill object as the URL hash (set by extension.ts).
       // Shape: { summary, key, workType }.
-      var prefill = {};
-      try { prefill = JSON.parse(decodeURIComponent(location.hash.slice(1) || "")) || {}; } catch (e) {}
+      var prefill = window.__PICA_PREFILL__ || {};
+      if (!window.__PICA_PREFILL__) {
+        try { prefill = JSON.parse(decodeURIComponent(location.hash.slice(1) || "")) || {}; } catch (e) {}
+      }
 
       document.getElementById("summary").textContent = prefill.summary || "";
       if (prefill.key) document.getElementById("key").value = prefill.key;

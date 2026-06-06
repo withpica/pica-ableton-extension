@@ -54,8 +54,12 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   const derivedKey = String(metadata["key"] ?? "");
 
   // 2. Confirm-and-edit panel. Title + artist are user-entered (the Set has neither).
-  const prefill = encodeURIComponent(JSON.stringify({ summary, key: derivedKey, workType: "song" }));
-  const url = `data:text/html,${encodeURIComponent(interfaceHtml)}#${prefill}`;
+  const prefillJson = JSON.stringify({ summary, key: derivedKey, workType: "song" }).replace(/</g, "\\u003c");
+  const injected = interfaceHtml.replace(
+    "</head>",
+    `<script>window.__PICA_PREFILL__ = ${prefillJson};</script></head>`,
+  );
+  const url = `data:text/html,${encodeURIComponent(injected)}`;
   const raw = await context.ui.showModalDialog(url, PANEL_W, PANEL_H);
 
   let answer: { cancelled?: boolean; title?: string; artistName?: string; workType?: string; key?: string };

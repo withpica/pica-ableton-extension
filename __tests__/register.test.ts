@@ -32,7 +32,7 @@ describe("registerSet", () => {
   it("dup-checks, creates work, then master recording, and returns ids + inspect url", async () => {
     const c = fakeClient();
     c.callTool
-      .mockResolvedValueOnce({ data: [] }) // pica_works_query (note: unwrapEnvelope already applied in real client; here raw)
+      .mockResolvedValueOnce([]) // pica_works_query → real client returns the unwrapped array
       .mockResolvedValueOnce({ id: "w1", completeness_score: 12 }) // works_create
       .mockResolvedValueOnce({ id: "r1" }); // recordings_create
 
@@ -61,7 +61,7 @@ describe("registerSet", () => {
   it("maps a 409 WORK_ALREADY_EXISTS from create into DuplicateWorkError", async () => {
     const c = fakeClient();
     c.callTool
-      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce([]) // pica_works_query → real client returns the unwrapped array
       .mockRejectedValueOnce(new PicaMcpError("dup", "WORK_ALREADY_EXISTS", { existing_work_id: "w7" }));
     await expect(registerSet(c, input)).rejects.toMatchObject({ name: "DuplicateWorkError", existingWorkId: "w7" });
   });
@@ -69,7 +69,7 @@ describe("registerSet", () => {
   it("propagates a recording-create failure (never reports success on a failed write)", async () => {
     const c = fakeClient();
     c.callTool
-      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce([]) // pica_works_query → real client returns the unwrapped array
       .mockResolvedValueOnce({ id: "w1" })
       .mockRejectedValueOnce(new PicaMcpError("boom", "500"));
     await expect(registerSet(c, input)).rejects.toBeInstanceOf(PicaMcpError);
@@ -84,7 +84,7 @@ describe("registerSet", () => {
   it("rethrows a WORK_ALREADY_EXISTS error that carries no existing_work_id (not a DuplicateWorkError)", async () => {
     const c = fakeClient();
     c.callTool
-      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce([]) // pica_works_query → real client returns the unwrapped array
       .mockRejectedValueOnce(new PicaMcpError("dup", "WORK_ALREADY_EXISTS", {}));
     await expect(registerSet(c, input)).rejects.toMatchObject({ name: "PicaMcpError" });
   });

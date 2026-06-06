@@ -27,6 +27,9 @@ export class DuplicateWorkError extends Error {
   }
 }
 
+// Idempotence is keyed on the client instance. This is correct because a
+// PicaMcpClient is created fresh per register flow (short-lived per session);
+// do not share one client across unrelated user sessions.
 const introduced = new WeakSet<PicaMcpClient>();
 
 /** Declare identity (ADR-247) once per client instance, so writes land in the /inspect live feed. */

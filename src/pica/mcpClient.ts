@@ -22,13 +22,15 @@ type FetchFn = typeof fetch;
 export function parseJsonRpcPayload(raw: string): any {
   const trimmed = raw.trim();
   if (trimmed.startsWith("{")) return JSON.parse(trimmed);
-  // SSE: find the last `data:` line and parse it.
-  const dataLine = trimmed
+  // SSE: find the last `data:` line that is not a [DONE] sentinel and parse it.
+  const dataLines = trimmed
     .split("\n")
-    .reverse()
-    .find((l) => l.startsWith("data:"));
+    .filter((l) => l.startsWith("data:"))
+    .map((l) => l.slice("data:".length).trim())
+    .filter((l) => l.length > 0 && l !== "[DONE]");
+  const dataLine = dataLines[dataLines.length - 1];
   if (!dataLine) throw new PicaMcpError(`Unparseable MCP response: ${trimmed.slice(0, 200)}`);
-  return JSON.parse(dataLine.slice("data:".length).trim());
+  return JSON.parse(dataLine);
 }
 
 /** Unwrap PICA's `{ success, message, data, ... }` envelope to its `data`, else return as-is. */

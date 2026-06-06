@@ -11,6 +11,12 @@ describe("parseJsonRpcPayload", () => {
     const raw = `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { ok: true } })}\n\n`;
     expect(parseJsonRpcPayload(raw)).toEqual({ jsonrpc: "2.0", id: 1, result: { ok: true } });
   });
+
+  it("ignores a trailing SSE [DONE] sentinel and parses the JSON data line", () => {
+    const json = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { ok: true } });
+    const raw = `event: message\ndata: ${json}\n\ndata: [DONE]\n\n`;
+    expect(parseJsonRpcPayload(raw)).toEqual({ jsonrpc: "2.0", id: 1, result: { ok: true } });
+  });
 });
 
 describe("PicaMcpClient.callTool", () => {
