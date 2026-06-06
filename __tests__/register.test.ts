@@ -74,4 +74,18 @@ describe("registerSet", () => {
       .mockRejectedValueOnce(new PicaMcpError("boom", "500"));
     await expect(registerSet(c, input)).rejects.toBeInstanceOf(PicaMcpError);
   });
+
+  it("rejects a blank title without calling any tool", async () => {
+    const c = fakeClient();
+    await expect(registerSet(c, { ...input, title: "   " })).rejects.toThrow(/blank/i);
+    expect(c.callTool).not.toHaveBeenCalled();
+  });
+
+  it("rethrows a WORK_ALREADY_EXISTS error that carries no existing_work_id (not a DuplicateWorkError)", async () => {
+    const c = fakeClient();
+    c.callTool
+      .mockResolvedValueOnce({ data: [] })
+      .mockRejectedValueOnce(new PicaMcpError("dup", "WORK_ALREADY_EXISTS", {}));
+    await expect(registerSet(c, input)).rejects.toMatchObject({ name: "PicaMcpError" });
+  });
 });

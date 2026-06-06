@@ -32,8 +32,9 @@ const introduced = new WeakSet<PicaMcpClient>();
 /** Declare identity (ADR-247) once per client instance, so writes land in the /inspect live feed. */
 export async function ensureIntroduced(client: PicaMcpClient, liveVersion: string): Promise<void> {
   if (introduced.has(client)) return;
+  const agentName = liveVersion ? `Ableton Live Extension ${liveVersion}` : "Ableton Live Extension";
   await client.callTool("pica_introduce_self", {
-    agent_name: `Ableton Live Extension ${liveVersion}`.trim(),
+    agent_name: agentName,
     agent_role: "DAW session capture (register-from-Set)",
   });
   introduced.add(client);
@@ -47,10 +48,16 @@ function asArray(queryResult: unknown): Array<{ id: string; title: string }> {
 
 /** Register the captured Set: dup-check → create work (with snapshot) → create master recording. */
 export async function registerSet(client: PicaMcpClient, input: RegisterInput): Promise<RegisterResult> {
+  if (!input.title.trim()) {
+    throw new Error("Cannot register: the work title is blank.");
+  }
+
   // 1. Duplicate check by title (weak, but cheap; the server 409 is the backstop).
   const queryResult = await client.callTool("pica_works_query", { query: input.title });
   const wanted = input.title.trim().toLowerCase();
-  const dup = asArray(queryResult).find((w) => (w.title ?? "").trim().toLowerCase() === wanted);
+  const dup = asArray(queryResult).find(
+    (w) => Boolean(w.id) && (w.title ?? "").trim().toLowerCase() === wanted,
+  );
   if (dup) throw new DuplicateWorkError(dup.id, input.title);
 
   // 2. Create the work, carrying the captured snapshot.
@@ -66,9 +73,10 @@ export async function registerSet(client: PicaMcpClient, input: RegisterInput): 
   } catch (e) {
     if (e instanceof PicaMcpError) {
       const existing = (e.data as { existing_work_id?: string } | undefined)?.existing_work_id;
-      if (e.code === "WORK_ALREADY_EXISTS" || existing) {
-        throw new DuplicateWorkError(existing ?? "", input.title);
+      if (existing) {
+        throw new DuplicateWorkError(existing, input.title);
       }
+      // WORK_ALREADY_EXISTS without a usable id: fall through and surface the raw error.
     }
     throw e;
   }
