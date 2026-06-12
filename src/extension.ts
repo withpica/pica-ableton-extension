@@ -146,9 +146,18 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   await showLink(context, "pica — registered", successBody(r.completenessScore), r.inspectUrl);
 
   // Stage 2: offer the attribution checklist right after register (skippable).
+  // Best-effort: the registration already succeeded — a checklist failure must
+  // not surface as an error dialog on top of the success dialog.
   if (r.recordingId) {
     const parts = deriveParts(snapshot);
-    await runCreditsFlow(context, client, r.recordingId, r.inspectUrl, buildPrefillRows(parts, []), []);
+    await runCreditsFlow(
+      context,
+      client,
+      r.recordingId,
+      r.inspectUrl,
+      buildPrefillRows(parts, []),
+      [],
+    ).catch(() => undefined);
   }
 }
 

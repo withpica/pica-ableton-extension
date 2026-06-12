@@ -4,7 +4,7 @@ Register your Ableton Live Set as a **work + master recording** in [PICA](https:
 
 Right-click a track → **Register Set in PICA** → a confirm panel shows the captured session (tracks, devices, samples, tempo, key). You add a title + artist; it creates one `work` and its master `recording` in your catalog and gives you the link. The full session snapshot is stashed on the work for later enrichment. Nothing is written until you confirm.
 
-This is **Stage 1** of ADR-259 ("PICA inside the DAW"). Later stages add per-instrument credits, bounce/stem upload, sample clearance, and deliver-from-DAW.
+This covers **Stages 1–2** of ADR-259 ("PICA inside the DAW"): register-from-Set plus the attribution checklist (per-instrument draft credits). Later stages add bounce/stem upload, sample clearance, and deliver-from-DAW.
 
 ## Requirements
 
