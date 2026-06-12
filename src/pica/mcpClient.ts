@@ -33,6 +33,24 @@ export function parseJsonRpcPayload(raw: string): any {
   return JSON.parse(dataLine);
 }
 
+/** Parse a tool's text content: pure JSON, or JSON after a human prefix ("Found 2 works.\n\n{..."), else wrap as a message. */
+export function parseToolText(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch {
+    /* fall through */
+  }
+  const start = text.search(/[{[]/);
+  if (start >= 0) {
+    try {
+      return JSON.parse(text.slice(start));
+    } catch {
+      /* fall through */
+    }
+  }
+  return { message: text };
+}
+
 /** Unwrap PICA's `{ success, message, data, ... }` envelope to its `data`, else return as-is. */
 export function unwrapEnvelope(payload: any): any {
   if (payload && typeof payload === "object" && "data" in payload) return payload.data;
@@ -82,14 +100,7 @@ export class PicaMcpClient {
 
     const result = payload.result;
     const text: unknown = result?.content?.[0]?.text;
-    let parsed: any = result;
-    if (typeof text === "string") {
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = { message: text };
-      }
-    }
+    const parsed: any = typeof text === "string" ? parseToolText(text) : result;
 
     if (result?.isError) {
       throw new PicaMcpError(
@@ -99,6 +110,10 @@ export class PicaMcpClient {
       );
     }
 
-    return unwrapEnvelope(parsed) as T;
+    // Success payloads: structuredContent is the machine-readable result; the
+    // text is a human message (often with no JSON, e.g. create tools).
+    const sc = result?.structuredContent;
+    const body = sc && typeof sc === "object" ? sc : parsed;
+    return unwrapEnvelope(body) as T;
   }
 }

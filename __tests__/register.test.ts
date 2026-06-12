@@ -51,6 +51,25 @@ describe("registerSet", () => {
     });
   });
 
+  // Real prod shape captured 2026-06-12: pica_works_query returns {count, items, ...}.
+  it("throws DuplicateWorkError when query returns the real {items} payload with a same-title work", async () => {
+    const c = fakeClient();
+    c.callTool.mockResolvedValueOnce({ count: 1, items: [{ id: "w9", title: "Night Drive" }], total: 1 });
+    await expect(registerSet(c, input)).rejects.toBeInstanceOf(DuplicateWorkError);
+    expect(c.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression: 2026-06-12 smoke test — a parsing miss made work.id undefined; the
+  // undefined work_id was silently dropped by JSON.stringify → orphaned recording.
+  it("aborts before creating a recording if works_create returns no id", async () => {
+    const c = fakeClient();
+    c.callTool
+      .mockResolvedValueOnce({ count: 0, items: [] }) // works_query
+      .mockResolvedValueOnce({ message: "Work created successfully" }); // works_create with no id
+    await expect(registerSet(c, input)).rejects.toThrow(/work id/i);
+    expect(c.callTool).toHaveBeenCalledTimes(2); // recordings_create never called
+  });
+
   it("throws DuplicateWorkError when query finds a same-title work", async () => {
     const c = fakeClient();
     c.callTool.mockResolvedValueOnce([{ id: "w9", title: "night drive" }]); // works_query returns array directly

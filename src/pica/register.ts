@@ -45,8 +45,9 @@ export async function ensureIntroduced(client: PicaMcpClient, liveVersion: strin
 
 function asArray(queryResult: unknown): Array<{ id: string; title: string }> {
   if (Array.isArray(queryResult)) return queryResult as Array<{ id: string; title: string }>;
-  const data = (queryResult as { data?: unknown } | null)?.data;
-  return Array.isArray(data) ? (data as Array<{ id: string; title: string }>) : [];
+  const obj = queryResult as { items?: unknown; data?: unknown } | null;
+  const list = obj?.items ?? obj?.data;
+  return Array.isArray(list) ? (list as Array<{ id: string; title: string }>) : [];
 }
 
 /** Register the captured Set: dup-check → create work (with snapshot) → create master recording. */
@@ -82,6 +83,14 @@ export async function registerSet(client: PicaMcpClient, input: RegisterInput): 
       // WORK_ALREADY_EXISTS without a usable id: fall through and surface the raw error.
     }
     throw e;
+  }
+
+  // Never proceed without an id: an undefined work_id is silently dropped by
+  // JSON.stringify and would create an unlinked (orphan) recording.
+  if (!work?.id) {
+    throw new Error(
+      "PICA created the work but did not return a work id — aborting before creating an unlinked recording.",
+    );
   }
 
   // 3. Create the master recording linked to the work.

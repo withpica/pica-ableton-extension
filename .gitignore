@@ -5,3 +5,4 @@ dist/
 
 # Ableton Extensions SDK tarballs — supply your own from Centercode (see README)
 vendor/*.tgz
+.DS_Store
