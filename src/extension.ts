@@ -120,7 +120,6 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
             context,
             client,
             found.recordingId,
-            workUrl,
             buildPrefillRows(parts, existing),
             existing,
           );
@@ -154,7 +153,6 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
       context,
       client,
       r.recordingId,
-      r.inspectUrl,
       buildPrefillRows(parts, []),
       [],
     ).catch(() => undefined);
@@ -186,7 +184,6 @@ async function runCreditsFlow(
   context: ExtensionContext<"1.0.0">,
   client: PicaMcpClient,
   recordingId: string,
-  workUrl: string,
   prefillRows: CreditRow[],
   existing: ExistingCredit[],
 ): Promise<void> {
@@ -215,7 +212,15 @@ async function runCreditsFlow(
     async () => saveCredits(client, recordingId, answer.rows!, existing),
   )) as CreditOutcome[];
 
-  await showLink(context, "pica — credits", formatOutcomes(outcomes), workUrl);
+  // Link the RECORDING page — that's where recording credits render in
+  // /inspect (the work page shows the composition side only; smoke-test
+  // finding 2026-06-12: a work-page link here reads as "credits missing").
+  await showLink(
+    context,
+    "pica — credits",
+    formatOutcomes(outcomes),
+    `${BASE_URL}/inspect/recordings/${recordingId}`,
+  );
 }
 
 async function showDialog(context: ExtensionContext<"1.0.0">, html: string, height: number): Promise<void> {
