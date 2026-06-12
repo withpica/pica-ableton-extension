@@ -56,6 +56,13 @@ npm run package  # → dist/pica.ablx
 
 Install the packaged extension by dropping `dist/pica.ablx` onto Live's **Extensions** settings page.
 
+> **Restart Live after ANY extension change** (install, remove, re-install, or
+> toggling Developer Mode). The 12.4.5 beta's Extension Host restarts on these
+> events and can die with "Address already in use" (visible in Log.txt) — the
+> context-menu item then silently does nothing until Live is fully quit and
+> relaunched. To upgrade an installed extension: remove it on the Extensions
+> page, drag the new `.ablx` in, then quit and relaunch Live.
+
 ## Use
 
 Right-click a track → **Register Set in PICA**. The confirm panel is editable; a duplicate title offers to open the existing work instead of creating a second. On success you get the work's completeness score and an `/inspect` link.
