@@ -108,3 +108,34 @@ export async function registerSet(client: PicaMcpClient, input: RegisterInput): 
     inspectUrl: `https://withpica.com/inspect/works/${work.id}`,
   };
 }
+
+export interface ExistingRegistration {
+  workId: string;
+  recordingId: string | null;
+}
+
+/**
+ * Re-run anchor: an already-registered Set is matched by exact work title
+ * (the same weak-but-cheap rule as the Stage-1 dup-check), then its master
+ * recording is found via pica_recordings_query { work_id }.
+ */
+export async function findExistingRegistration(
+  client: PicaMcpClient,
+  title: string,
+): Promise<ExistingRegistration | null> {
+  const wanted = title.trim().toLowerCase();
+  if (!wanted) return null;
+
+  const workRes = await client.callTool("pica_works_query", { query: title });
+  const work = asArray(workRes).find(
+    (w) => Boolean(w.id) && (w.title ?? "").trim().toLowerCase() === wanted,
+  );
+  if (!work) return null;
+
+  const recRes = await client.callTool("pica_recordings_query", {
+    work_id: work.id,
+  });
+  const recs = asArray(recRes) as Array<{ id: string; version_type?: string }>;
+  const master = recs.find((r) => r.version_type === "master") ?? recs[0];
+  return { workId: work.id, recordingId: master?.id ?? null };
+}

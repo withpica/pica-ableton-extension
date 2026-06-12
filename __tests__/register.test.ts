@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ensureIntroduced, registerSet, DuplicateWorkError, type RegisterInput } from "../src/pica/register";
+import { ensureIntroduced, registerSet, findExistingRegistration, DuplicateWorkError, type RegisterInput } from "../src/pica/register";
 import { PicaMcpError } from "../src/pica/mcpClient";
 
 function fakeClient() {
@@ -106,5 +106,43 @@ describe("registerSet", () => {
       .mockResolvedValueOnce([]) // pica_works_query → real client returns the unwrapped array
       .mockRejectedValueOnce(new PicaMcpError("dup", "WORK_ALREADY_EXISTS", {}));
     await expect(registerSet(c, input)).rejects.toMatchObject({ name: "PicaMcpError" });
+  });
+});
+
+describe("findExistingRegistration", () => {
+  it("returns work + master recording ids for an exact-title match", async () => {
+    const c = fakeClient();
+    c.callTool
+      .mockResolvedValueOnce({ count: 1, items: [{ id: "w1", title: "Night Drive" }] })
+      .mockResolvedValueOnce({
+        count: 2,
+        items: [
+          { id: "r2", version_type: "remix" },
+          { id: "r1", version_type: "master" },
+        ],
+      });
+
+    const out = await findExistingRegistration(c, "night drive");
+
+    expect(c.callTool).toHaveBeenNthCalledWith(1, "pica_works_query", { query: "night drive" });
+    expect(c.callTool).toHaveBeenNthCalledWith(2, "pica_recordings_query", { work_id: "w1" });
+    expect(out).toEqual({ workId: "w1", recordingId: "r1" });
+  });
+
+  it("returns null when no work matches the title exactly", async () => {
+    const c = fakeClient();
+    c.callTool.mockResolvedValueOnce({ count: 1, items: [{ id: "w1", title: "Other Song" }] });
+    expect(await findExistingRegistration(c, "Night Drive")).toBeNull();
+  });
+
+  it("falls back to the first recording when none is version_type master", async () => {
+    const c = fakeClient();
+    c.callTool
+      .mockResolvedValueOnce({ count: 1, items: [{ id: "w1", title: "Night Drive" }] })
+      .mockResolvedValueOnce({ count: 1, items: [{ id: "r7", version_type: "remix" }] });
+    expect(await findExistingRegistration(c, "Night Drive")).toEqual({
+      workId: "w1",
+      recordingId: "r7",
+    });
   });
 });
