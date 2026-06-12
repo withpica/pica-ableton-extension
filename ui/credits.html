@@ -1,0 +1,94 @@
+<!doctype html>
+<!-- Copyright (c) 2024-2026 Withpica Ltd. All rights reserved. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { --bg:#0A0A0A; --line:rgba(255,255,255,.10); --fg:#EDEDED; --muted:rgba(255,255,255,.45); --copper:#B87333; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; padding:16px; }
+      h1 { font-size:14px; font-weight:400; letter-spacing:.04em; margin:0 0 4px; }
+      .hint { color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; margin-bottom:12px; }
+      #rows { max-height:300px; overflow-y:auto; }
+      .credit-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+      .credit-row input { background:transparent; border:1px solid var(--line); color:var(--fg); padding:6px 8px; font:12px ui-monospace,Menlo,monospace; }
+      .credit-row input:focus { outline:none; border-color:var(--copper); }
+      .credit-row .instrument { flex:1; }
+      .credit-row .who { flex:1.2; }
+      .credit-row .remove { background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:14px; padding:0 2px; }
+      .add { background:transparent; border:1px dashed var(--line); color:var(--muted); width:100%; padding:7px; cursor:pointer; font-size:12px; margin-top:2px; }
+      .actions { display:flex; gap:8px; margin-top:16px; }
+      .actions button { flex:1; padding:9px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; font-size:12px; letter-spacing:.04em; }
+      .actions button.primary { border-color:var(--copper); color:var(--copper); }
+    </style>
+  </head>
+  <body>
+    <h1>who played what?</h1>
+    <div class="hint" id="hint">instrument is a suggestion from the track name — edit freely. leave a row's name blank to skip it.</div>
+    <div id="rows"></div>
+    <button class="add" id="add">+ add a part</button>
+    <div class="actions">
+      <button id="skip">skip — do later</button>
+      <button id="save" class="primary">save credits</button>
+    </div>
+
+    <script>
+      // Injected by extension.ts. Shape: { rows: [{ instrument, performerName }] }.
+      var prefill = window.__PICA_PREFILL__ || {};
+      if (!window.__PICA_PREFILL__) {
+        try { prefill = JSON.parse(decodeURIComponent(location.hash.slice(1) || "")) || {}; } catch (e) {}
+      }
+      var rowsEl = document.getElementById("rows");
+
+      function addRow(instrument, performerName) {
+        var div = document.createElement("div");
+        div.className = "credit-row";
+        var inst = document.createElement("input");
+        inst.className = "instrument";
+        inst.placeholder = "instrument";
+        inst.value = instrument || "";
+        var who = document.createElement("input");
+        who.className = "who";
+        who.placeholder = "who played this?";
+        who.value = performerName || "";
+        var rm = document.createElement("button");
+        rm.className = "remove";
+        rm.textContent = "×";
+        rm.title = "remove row";
+        rm.addEventListener("click", function () { div.remove(); });
+        div.appendChild(inst);
+        div.appendChild(who);
+        div.appendChild(rm);
+        rowsEl.appendChild(div);
+      }
+
+      (prefill.rows || []).forEach(function (r) { addRow(r.instrument, r.performerName); });
+      if (!(prefill.rows || []).length) addRow("", "");
+
+      document.getElementById("add").addEventListener("click", function () { addRow("", ""); });
+
+      function post(resultObj) {
+        var msg = { method: "close_and_send", params: [JSON.stringify(resultObj)] };
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.live) {
+          window.webkit.messageHandlers.live.postMessage(msg); // macOS
+        } else if (window.chrome && window.chrome.webview) {
+          window.chrome.webview.postMessage(msg); // Windows
+        }
+      }
+
+      document.getElementById("skip").addEventListener("click", function () {
+        post({ cancelled: true });
+      });
+      document.getElementById("save").addEventListener("click", function () {
+        var rows = [];
+        rowsEl.querySelectorAll(".credit-row").forEach(function (div) {
+          rows.push({
+            instrument: div.querySelector(".instrument").value.trim(),
+            performerName: div.querySelector(".who").value.trim(),
+          });
+        });
+        post({ cancelled: false, rows: rows });
+      });
+    </script>
+  </body>
+</html>
