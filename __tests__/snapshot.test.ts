@@ -8,9 +8,9 @@ const sample: SongSnapshot = {
   signatureNumerator: 4,
   signatureDenominator: 4,
   tracks: [
-    { name: "Drums", type: "midi", deviceNames: ["Drum Rack"], sampleFilePaths: ["/s/kick.wav"] },
-    { name: "Bass", type: "midi", deviceNames: ["Serum"], sampleFilePaths: [] },
-    { name: "Vocal", type: "audio", deviceNames: ["EQ Eight"], sampleFilePaths: [] },
+    { name: "Drums", type: "midi", deviceNames: ["Drum Rack"], sampleFilePaths: ["/s/kick.wav"], groupIndex: null, clipCount: 0 },
+    { name: "Bass", type: "midi", deviceNames: ["Serum"], sampleFilePaths: [], groupIndex: null, clipCount: 0 },
+    { name: "Vocal", type: "audio", deviceNames: ["EQ Eight"], sampleFilePaths: [], groupIndex: null, clipCount: 0 },
   ],
 };
 
@@ -38,6 +38,24 @@ describe("buildMetadata", () => {
     });
     expect(m.devices).toEqual(expect.arrayContaining(["Drum Rack", "Serum", "EQ Eight"]));
     expect((m.tracks as unknown[]).length).toBe(3);
+  });
+});
+
+describe("buildMetadata — group and clip fields", () => {
+  it("includes group and clip info in metadata tracks", () => {
+    const snap: SongSnapshot = {
+      tempo: 120,
+      rootNote: 5, // F
+      scaleName: "Major",
+      tracks: [
+        { name: "Group Bus", type: "group", deviceNames: [], sampleFilePaths: [], groupIndex: null, clipCount: 0 },
+        { name: "Kick", type: "audio", deviceNames: ["Drum Buss"], sampleFilePaths: [], groupIndex: 0, clipCount: 3 },
+      ],
+    };
+    const md = buildMetadata(snap);
+    const tracks = md.tracks as Array<Record<string, unknown>>;
+    expect(tracks[0]).toMatchObject({ group: null, clips: 0 });
+    expect(tracks[1]).toMatchObject({ group: 0, clips: 3 });
   });
 });
 

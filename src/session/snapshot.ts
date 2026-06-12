@@ -7,6 +7,10 @@ export interface TrackSnapshot {
   type: TrackKind;
   deviceNames: string[];
   sampleFilePaths: string[];
+  /** Index (into SongSnapshot.tracks) of the group track this track sits in; null at top level. */
+  groupIndex: number | null;
+  /** Session clips (non-empty slots) + arrangement clips on this track. */
+  clipCount: number;
 }
 
 export interface SongSnapshot {
@@ -52,6 +56,8 @@ export function buildMetadata(s: SongSnapshot): Record<string, unknown> {
       type: t.type,
       devices: t.deviceNames,
       samples: t.sampleFilePaths,
+      group: t.groupIndex,
+      clips: t.clipCount,
     })),
   };
 }
