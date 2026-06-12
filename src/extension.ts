@@ -7,6 +7,7 @@ import { readApiKey } from "./pica/keyStore";
 import { readSong, type SongLike } from "./session/read";
 import { buildMetadata, buildSummary } from "./session/snapshot";
 import { ensureIntroduced, registerSet, DuplicateWorkError } from "./pica/register";
+import { messageHtml, linkMessageHtml, successBody } from "./dialogHtml";
 
 const BASE_URL = "https://withpica.com";
 const PANEL_W = 380;
@@ -92,9 +93,11 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     },
   ).catch(async (e: unknown) => {
     if (e instanceof DuplicateWorkError) {
-      await showError(
+      await showLink(
         context,
-        `Already registered. Open it in PICA:\n${BASE_URL}/inspect/works/${e.existingWorkId}`,
+        "pica — already registered",
+        "a work with this title already exists in your catalog.",
+        `${BASE_URL}/inspect/works/${e.existingWorkId}`,
       );
       return undefined;
     }
@@ -104,27 +107,16 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   if (!result || typeof result !== "object" || !("inspectUrl" in result)) return;
 
   const r = result as { completenessScore?: number; inspectUrl: string };
-  const score = typeof r.completenessScore === "number" ? ` · ${r.completenessScore}% complete` : "";
-  await showInfo(context, `Registered${score}.\nView in PICA:\n${r.inspectUrl}`);
+  await showLink(context, "pica — registered", successBody(r.completenessScore), r.inspectUrl);
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
-}
-
-async function showMessage(context: ExtensionContext<"1.0.0">, title: string, body: string): Promise<void> {
-  const html =
-    `<!doctype html><meta charset="utf-8"><body style="margin:0;background:#0A0A0A;color:#EDEDED;` +
-    `font:13px ui-monospace,Menlo,monospace;padding:18px;white-space:pre-wrap">` +
-    `<div style="color:#B87333;margin-bottom:8px">${escapeHtml(title)}</div>${escapeHtml(body)}` +
-    `<div style="margin-top:16px"><button onclick="(window.webkit&&webkit.messageHandlers.live` +
-    `?webkit.messageHandlers.live:chrome.webview).postMessage({method:'close_and_send',params:['ok']})">close</button></div>`;
-  await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(html)}`, 360, 200);
+async function showDialog(context: ExtensionContext<"1.0.0">, html: string, height: number): Promise<void> {
+  await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(html)}`, 360, height);
 }
 
 function showError(context: ExtensionContext<"1.0.0">, body: string): Promise<void> {
-  return showMessage(context, "pica — error", body);
+  return showDialog(context, messageHtml("pica — error", body), 200);
 }
-function showInfo(context: ExtensionContext<"1.0.0">, body: string): Promise<void> {
-  return showMessage(context, "pica", body);
+function showLink(context: ExtensionContext<"1.0.0">, title: string, body: string, url: string): Promise<void> {
+  return showDialog(context, linkMessageHtml(title, body, url), 280);
 }
