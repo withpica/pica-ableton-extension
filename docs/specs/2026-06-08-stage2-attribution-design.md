@@ -1,6 +1,6 @@
 # ADR-259 Stage 2 — Attribution → Credits (design)
 
-**Status:** Designed (2026-06-08) — approved in brainstorming; implementation plan not yet written.
+**Status:** Reviewed & approved (2026-06-12) — founder decisions locked, open items resolved against the live PICA schema/tools (see "Resolved at review"); implementation plan not yet written. Stage 1 in-Live smoke test passed 2026-06-12; its field findings are folded in below.
 **Context:** Stage 2 of ADR-259 ("PICA inside the DAW"). Stage 1 (register-from-Set) is built and shipped (this repo + the `pica_works_create` `metadata` param, PICA PR #909). This spec covers turning the registered Set's *parts* into *credits*. ADR-259 lives on the PICA `feature/adr-256-agent-governance` branch; the Stage-1 plan is at `docs/superpowers/plans/2026-06-06-adr-259-ableton-extension-stage1.md` in the PICA repo.
 
 ## Goal
@@ -15,6 +15,9 @@ The honest core: the tool does the *noticing*; the human does the *naming*. It n
 2. **Write depth — draft + auto-link.** Each credit is written as instrument + role + name; if the name exactly matches a person already in the org, link it; otherwise leave a free-text draft. Reuses the existing ADR-255 name resolver. Attestation is a separate, later step (existing PICA flow), not in v1.
 3. **Flow — after register + re-runnable.** The checklist is offered right after the Stage-1 register (skippable), and the existing right-click re-opens it later on an already-registered Set, pre-filled from credits already saved.
 4. **Instrument guess — track-name-first.** Pre-fill the label from the track name (editable), with device + sample filename shown as context. The optional AI layer later improves poorly-named rows.
+5. **Default role — `Performer`** (founder, 2026-06-12). Every checklist credit is stamped `role: "Performer"` (from the 16-entry `RECORDING_CREDIT_ROLES` enum) — generic enough to be true for both instrumental and vocal takes; editable later in PICA. No per-row role dropdown in v1.
+6. **One merged credit per person — liner-notes rule** (founder, 2026-06-12). Prod enforces `UNIQUE (recording_id, credited_name, role)` — instrument is NOT in the key, so "Dave – drums" + "Dave – bass" as two Performer rows would violate it. v1 folds all parts attributed to the same person into ONE credit row, `instrument` carrying the combined list ("drums, bass") — exactly how liner notes read. No PICA uniqueness change.
+7. **Per-row writes** (founder, 2026-06-12). One `pica_recording_credits_update` call per credit, not the bulk tool — precise per-row success/failure reporting (matches the no-silent-failure rule); a few extra seconds is acceptable for a human-driven checklist.
 
 ## Success criteria
 
@@ -30,7 +33,7 @@ Builds on the existing Stage-1 core (`src/pica/*`, `src/session/*`). New/changed
 
 | Unit | Responsibility | Depends on |
 | --- | --- | --- |
-| `src/session/read.ts` + `snapshot.ts` (extend) | Capture **group membership** per track (the SDK `Track.groupTrack` parent), which Stage 1's flat `SongSnapshot` does not carry. Add an optional `groupName?` (or `parentKey?`) to `TrackSnapshot` so groups can be folded. Small, additive; existing Stage-1 tests stay green. | `@ableton-extensions/sdk` types |
+| `src/session/read.ts` + `snapshot.ts` (extend) | Capture **group membership** per track (the SDK `Track.groupTrack` parent), which Stage 1's flat `SongSnapshot` does not carry. Add an optional `groupName?` (or `parentKey?`) to `TrackSnapshot` so groups can be folded. **Field finding (2026-06-12 smoke test, real 53-track Set): `className`-based kind detection returned `"other"` for EVERY track, `sampleFilePaths` came back empty, and groups arrived flat — so this extension must also find a working track-kind discriminator in the SDK type defs AND capture clip presence (read.ts reads no clips today, and the Part include-rule depends on "audio track with ≥1 clip"). If the SDK is stingy, parts.ts falls back to a resilient include-rule (devices OR clips present) and lets the human delete rows.** | `@ableton-extensions/sdk` types |
 | `src/session/parts.ts` (new) | Pure: turn the (group-aware) `SongSnapshot` into an ordered list of `Part`s — one per performed track, groups folded to one Part, returns/master/empty excluded. Derive the pre-filled instrument label + context lines + stable key. | `src/session/snapshot.ts` types |
 | `src/pica/credits.ts` (new) | Pure orchestration: given the master recording id + the filled rows, map rows → `recording_credits` writes, auto-link names via the resolver, dedupe against existing credits, call the PICA credit MCP tool. | `src/pica/mcpClient.ts` |
 | `src/pica/register.ts` (extend) | After `registerSet` succeeds, return enough to drive the credits step (work id + recording id). Add a `loadExistingCredits(recordingId)` read for the re-run path. | `src/pica/mcpClient.ts` |
@@ -55,10 +58,10 @@ export interface CreditRow {        // what the panel returns per filled row
   instrument: string;
   performerName: string;            // free text the user typed; "" = skip this row
 }
-export interface CreditWrite {      // what we send to PICA per credit
+export interface CreditWrite {      // what we send to PICA per credit — ONE per person (decision 6)
   recordingId: string;
-  instrument: string;
-  role: string;                     // v1 default (see Open items)
+  instrument: string;               // merged list when one person played several parts: "drums, bass"
+  role: "Performer";                // v1 default (decision 5)
   creditedName: string;
   personId: string | null;          // set iff the resolver found exactly one org match
 }
@@ -81,11 +84,12 @@ export interface CreditWrite {      // what we send to PICA per credit
 
 ### Write path (`credits.ts`)
 
-For each row with a non-empty performer name, targeting the master recording id:
-1. **Resolve** the name through the existing PICA resolver (ADR-255: exact, case-insensitive match on `name` | `stage_names`, org-scoped). Exactly one match → `personId`. Zero or ambiguous → `personId = null` (the `creditedName` carries the name as a draft). **Never auto-create a person in v1.**
-2. **Dedupe** against credits already on the recording: skip a write whose `(instrument, creditedName)` already exists (re-run safety); update in place if only the person link changed.
-3. **Write** one `recording_credits` row `{ recordingId, instrument, role, creditedName, personId }` via PICA's recording-credit MCP tool over `/api/mcp` (instrumented → flashes in `/inspect`).
-4. Report per-row outcome; a partial failure surfaces which rows landed and which didn't. No silent success.
+For each row with a non-empty performer name:
+1. **Merge per person first (decision 6):** group filled rows by performer name (case-insensitive); one `CreditWrite` per person, `instrument` = the joined labels ("drums, bass").
+2. **Resolve** the name through the existing PICA resolver (ADR-255: exact, case-insensitive match on `name` | `stage_names`, org-scoped). Exactly one match → `personId`. Zero or ambiguous → `personId = null` (the `creditedName` carries the name as a draft). **Never auto-create a person in v1.**
+3. **Dedupe** against credits already on the recording using the DB's own uniqueness key `(recording_id, credited_name, role)`: an existing row for that person → update its instrument list / person link rather than insert (re-run safety).
+4. **Write** one `recording_credits` row per person via `pica_recording_credits_update` over `/api/mcp` (instrumented → flashes in `/inspect`), one call per credit (decision 7).
+5. Report per-row outcome; a partial failure surfaces which rows landed and which didn't. No silent success.
 
 ### Optional AI layer (documented, not v1 code)
 
@@ -111,11 +115,11 @@ The baseline must be self-contained, but designed so an assistant can take over 
 
 **Not in v1:** AI integration code (documented pattern only); attestation routing; auto-creating people; per-child group rows; role editing beyond a default; instrument inference beyond track-name-first (the AI layer's job later).
 
-## Open items to resolve at planning time
+## Resolved at review (2026-06-12, verified against prod schema + mcp-server source)
 
-1. **Exact PICA MCP tool** for writing a `recording_credits` row (and the read tool for loading a recording's existing credits for the re-run path). The SDK exposes a `credits` resource (`atomicAdd`/`listForWork`/`sendForAttestation`) over REST `/api/admin/*`; v1 must use the **`/api/mcp`** tool equivalent so the write is instrumented (feed-visible). Confirm the tool name + argument schema, including whether credits attach by `recording_id` directly or via the work.
-2. **Default `role` value** for a performed part (e.g. `performer` / `musician`) — confirm against the `recording_credits.role` conventions/enum.
-3. **Re-run merge rule** — confirm the dedupe key (`recording_id` + `instrument` + `credited_name`) matches how `recording_credits` uniqueness is treated, to avoid both duplicates and accidental overwrites.
+1. **Write tool: `pica_recording_credits_update`** (ADR-213 Primitive B; required `recording_id` + `credited_name` + `role`, optional `person_id`/`notes`/`attestation_status`; credits attach by `recording_id` directly). Read path for re-run: `pica_recordings_inspect` with `sections: ["recording_credits"]`. **Gap → PICA-side prerequisite PR:** the tool does NOT yet expose `instrument` even though `recording_credits.instrument` exists (text, nullable, ADR-252 merge) — expose it on the tool schema (same shape as Stage 1's `metadata` param, PR #909) **and render the instrument column in `/inspect`'s recording contributors table (`app/inspect/components/RecordingContributors.tsx`), which currently doesn't display it** (the column was empty until Stage 2 starts writing it). One small PR, both halves.
+2. **Default `role` = `Performer`** — from the live 16-entry CHECK enum (`MainArtist…Other`). Founder-confirmed.
+3. **Dedupe key = the DB's `UNIQUE (recording_id, credited_name, role)`** — instrument is NOT part of uniqueness, hence decision 6 (one merged credit per person). Re-run updates the existing row (instrument list / person link) instead of inserting.
 
 ## Acceptance criteria
 
