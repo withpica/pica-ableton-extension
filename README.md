@@ -8,7 +8,10 @@ This is **Stage 1** of ADR-259 ("PICA inside the DAW"). Later stages add per-ins
 
 ## Requirements
 
-- **Ableton Live 12.4.5+ Suite** (Beta) with the Extensions SDK enabled — Extensions are Suite-only.
+- **Ableton Live 12.4.5+ beta** with the Extensions SDK. Extensions are
+  Suite-gated — but the **unauthorized beta (demo mode) shows them too**, and
+  registration never needs to save the Set, so a license is not required for
+  testing. (A Standard authorization *hides* the Extensions page.)
 - **Node.js ≥ 24.14.1** (required by the Ableton CLI).
 - A **PICA** account with a `write:catalog` API key.
 
@@ -56,6 +59,14 @@ Install the packaged extension by dropping `dist/pica.ablx` onto Live's **Extens
 ## Use
 
 Right-click a track → **Register Set in PICA**. The confirm panel is editable; a duplicate title offers to open the existing work instead of creating a second. On success you get the work's completeness score and an `/inspect` link.
+
+After a successful register (or when re-running on an already-registered Set), a
+credits checklist opens: one row per performed part with the instrument
+pre-filled from the track/group name. Type who played each part and save —
+credits land on the master recording as `Performer` rows (one per person,
+instruments combined), auto-linked to existing people in your org by exact
+name match, kept as free-text drafts otherwise. Skipping writes nothing.
+Re-running shows what's already saved and never duplicates.
 
 ## How it works
 
