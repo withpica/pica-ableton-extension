@@ -91,13 +91,13 @@ export function successBody(
   }
   if (masterOwnership === "created") {
     lines.push(
-      "master ownership: your org now owns 100% of this master — refine splits in PICA.",
+      "master ownership: your org now owns 100% of this master. refine splits in PICA.",
     );
   } else if (masterOwnership === "skipped_existing") {
     lines.push("master ownership: already set.");
   } else if (masterOwnership === "failed") {
     lines.push(
-      "master ownership could not be saved automatically — set it in PICA.",
+      "master ownership could not be saved automatically. set it in PICA.",
     );
   }
   return lines.join("\n");

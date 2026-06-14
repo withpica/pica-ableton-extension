@@ -69,6 +69,12 @@ describe("successBody", () => {
     expect(html).toContain("master ownership");
     expect(html).toContain("could not be saved");
   });
+
+  it("successBody shows 'already set' for skipped_existing ownership", () => {
+    const html = successBody(12, "skipped_existing");
+    expect(html).toContain("master ownership");
+    expect(html).toContain("already set");
+  });
 });
 
 describe("pasteKeyHtml", () => {
