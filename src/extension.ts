@@ -24,6 +24,7 @@ import {
 } from "./pica/credits";
 import { messageHtml, linkMessageHtml, successBody } from "./dialogHtml";
 import { connectAndStoreKey, withReconnect } from "./pica/connect";
+import type { MasterOwnershipOutcome } from "./pica/ownership";
 
 const BASE_URL = "https://withpica.com";
 const PANEL_W = 380;
@@ -166,7 +167,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     recordingId: string;
     completenessScore?: number;
     inspectUrl: string;
-    masterOwnership?: "created" | "skipped_existing" | "failed";
+    masterOwnership?: MasterOwnershipOutcome["status"];
   };
   await showLink(context, "pica — registered", successBody(r.completenessScore, r.masterOwnership), r.inspectUrl);
 

@@ -1,5 +1,7 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
+import type { MasterOwnershipOutcome } from "./pica/ownership";
+
 /**
  * Pure HTML builders for the extension's modal dialogs (host-independent,
  * unit-testable). The Extensions SDK has no host API to open a browser or
@@ -81,7 +83,7 @@ export function pasteKeyHtml(): string {
 /** Success dialog body: an unambiguous "it's in PICA" + a non-alarming completeness line. */
 export function successBody(
   completenessScore?: number,
-  masterOwnership?: "created" | "skipped_existing" | "failed",
+  masterOwnership?: MasterOwnershipOutcome["status"],
 ): string {
   const lines = ["the work and its master recording are now in your catalog."];
   if (typeof completenessScore === "number") {
@@ -97,7 +99,7 @@ export function successBody(
     lines.push("master ownership: already set.");
   } else if (masterOwnership === "failed") {
     lines.push(
-      "master ownership could not be saved automatically. set it in PICA.",
+      "master ownership: could not be saved automatically. set it in PICA.",
     );
   }
   return lines.join("\n");
