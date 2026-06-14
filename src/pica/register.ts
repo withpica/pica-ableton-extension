@@ -43,6 +43,31 @@ export async function ensureIntroduced(client: PicaMcpClient, liveVersion: strin
   introduced.add(client);
 }
 
+/** Version types offered for "register as a new version" — every audio version
+ *  type except the original `master` and the two video deliverables. Default first. */
+export const NEW_VERSION_TYPES = [
+  "alternate", "alternate_master", "remix", "acoustic",
+  "live_performance", "cover", "demo",
+] as const;
+
+/** Create a recording under an EXISTING work with a given version type.
+ *  Shared by registerSet (master) and the new-version / recovery paths. */
+export async function createRecordingForWork(
+  client: PicaMcpClient,
+  input: { workId: string; title: string; artistName: string; versionType: string },
+): Promise<{ recordingId: string }> {
+  const rec = await client.callTool<{ id: string }>("pica_recordings_create", {
+    title: input.title,
+    artist_name: input.artistName,
+    version_type: input.versionType,
+    work_id: input.workId,
+  });
+  if (!rec?.id) {
+    throw new Error("PICA created the recording but did not return an id.");
+  }
+  return { recordingId: rec.id };
+}
+
 function asArray(queryResult: unknown): Array<{ id: string; title: string }> {
   if (Array.isArray(queryResult)) return queryResult as Array<{ id: string; title: string }>;
   const obj = queryResult as { items?: unknown; data?: unknown } | null;
