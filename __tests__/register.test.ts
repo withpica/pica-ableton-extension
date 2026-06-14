@@ -126,6 +126,16 @@ describe("registerSet", () => {
       .mockRejectedValueOnce(new PicaMcpError("dup", "WORK_ALREADY_EXISTS", {}));
     await expect(registerSet(c, input)).rejects.toMatchObject({ name: "PicaMcpError" });
   });
+
+  it("propagates a 401 from ownership capture so the reconnect path re-runs", async () => {
+    const c = fakeClient();
+    c.callTool
+      .mockResolvedValueOnce([]) // works_query
+      .mockResolvedValueOnce({ id: "w1" }) // works_create
+      .mockResolvedValueOnce({ id: "r1" }) // recordings_create
+      .mockRejectedValueOnce(new PicaMcpError("Unauthorized", "401")); // splits_list → 401
+    await expect(registerSet(c, input)).rejects.toBeInstanceOf(PicaMcpError);
+  });
 });
 
 describe("findExistingRegistration", () => {

@@ -103,6 +103,14 @@ export async function registerSet(client: PicaMcpClient, input: RegisterInput): 
     work_id: work.id,
   });
 
+  // Never proceed without an id: an undefined recording_id would silently corrupt
+  // the ownership write (JSON.stringify drops undefined values).
+  if (!recording?.id) {
+    throw new Error(
+      "PICA created the recording but returned no id — aborting before ownership capture.",
+    );
+  }
+
   // 4. Capture master ownership (100% to the registering org). Insert-once; a 401
   // propagates so the reconnect path re-runs, any other failure is reported not thrown.
   const ownership = await ensureMasterOwnership(client, recording.id);
