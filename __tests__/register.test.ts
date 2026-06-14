@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ensureIntroduced, registerSet, findExistingRegistration, DuplicateWorkError, createRecordingForWork, NEW_VERSION_TYPES, type RegisterInput } from "../src/pica/register";
+import { ensureIntroduced, registerSet, findExistingRegistration, DuplicateWorkError, createRecordingForWork, NEW_VERSION_TYPES, coerceVersionType, type RegisterInput } from "../src/pica/register";
 import { PicaMcpError } from "../src/pica/mcpClient";
 
 function fakeClient() {
@@ -153,6 +153,19 @@ describe("NEW_VERSION_TYPES", () => {
     expect(NEW_VERSION_TYPES).not.toContain("music_video");
     expect(NEW_VERSION_TYPES).not.toContain("lyric_video");
     expect(NEW_VERSION_TYPES[0]).toBe("alternate"); // default-first
+  });
+});
+
+describe("coerceVersionType", () => {
+  it("passes through a valid version type", () => {
+    expect(coerceVersionType("remix")).toBe("remix");
+    expect(coerceVersionType("alternate_master")).toBe("alternate_master");
+  });
+  it("defaults unrecognised / missing values to alternate", () => {
+    expect(coerceVersionType("master")).toBe("alternate"); // excluded from NEW_VERSION_TYPES
+    expect(coerceVersionType("nonsense")).toBe("alternate");
+    expect(coerceVersionType(undefined)).toBe("alternate");
+    expect(coerceVersionType(42)).toBe("alternate");
   });
 });
 

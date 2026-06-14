@@ -50,6 +50,14 @@ export const NEW_VERSION_TYPES = [
   "live_performance", "cover", "demo",
 ] as const;
 
+/** Coerce a dialog-supplied version type to a valid NEW_VERSION_TYPES value,
+ *  defaulting to "alternate" for anything unrecognised. */
+export function coerceVersionType(value: unknown): string {
+  return (NEW_VERSION_TYPES as readonly string[]).includes(value as string)
+    ? (value as string)
+    : "alternate";
+}
+
 /** Create a recording under an EXISTING work with a given version type.
  *  Shared by registerSet (master) and the new-version / recovery paths. */
 export async function createRecordingForWork(

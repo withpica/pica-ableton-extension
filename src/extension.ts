@@ -15,6 +15,7 @@ import {
   DuplicateWorkError,
   createRecordingForWork,
   NEW_VERSION_TYPES,
+  coerceVersionType,
 } from "./pica/register";
 import {
   buildPrefillRows,
@@ -141,9 +142,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
       const parts = deriveParts(snapshot);
 
       if (choice.action === "newVersion") {
-        const versionType = NEW_VERSION_TYPES.includes(choice.versionType as never)
-          ? (choice.versionType as string)
-          : "alternate";
+        const versionType = coerceVersionType(choice.versionType);
         const { recordingId } = await runWithClient((c) =>
           createRecordingForWork(c, {
             workId: e.existingWorkId,
@@ -164,6 +163,8 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           existing = await loadExistingCredits(client, recordingId);
         } else {
           // Work exists without a recording → complete it: create the master.
+          // findExistingRegistration matched by exact title; for a title-deduped catalog
+          // its work and e.existingWorkId are the same work — create the master there.
           const created = await runWithClient((c) =>
             createRecordingForWork(c, {
               workId: e.existingWorkId,
