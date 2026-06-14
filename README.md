@@ -13,7 +13,8 @@ This covers **Stages 1–2** of ADR-259 ("PICA inside the DAW"): register-from-S
   registration never needs to save the Set, so a license is not required for
   testing. (A Standard authorization *hides* the Extensions page.)
 - **Node.js ≥ 24.14.1** (required by the Ableton CLI).
-- A **PICA** account with a `write:catalog` API key.
+- A **PICA** account (the extension mints the `write:catalog` key for you on
+  first use — see Connecting to PICA below).
 
 ## Setup
 
@@ -34,14 +35,20 @@ npm install
 
 > If your Centercode download is a newer beta, the filenames/version will differ — update the two `file:vendor/...` paths in `package.json` to match, then `npm install`.
 
-### 2. Add your PICA key
+### 2. Connecting to PICA
 
-Create a `write:catalog` key in PICA → **settings → connection**. Run the extension once (`npm start`); if no key is found it shows a dialog with the exact storage-directory path. Save your key there:
+The first time you run **Register Set in PICA** with no stored key, the extension
+opens a Connect window: log in (or create an account) and click **authorize** —
+the extension stores a `write:catalog` connection key for you. No file editing.
 
-```jsonc
-// <storageDirectory>/pica-credentials.json
-{ "apiKey": "withpica_live_..." }
-```
+If the in-app window can't sign you in, click **open in browser instead**, copy
+the key shown after you authorize, and paste it into the extension's paste field.
+
+If a stored key has been revoked or expired, a register will detect the 401 and
+re-open Connect once to mint a fresh key, then retry automatically.
+
+**Manual fallback (advanced):** write `{ "apiKey": "withpica_live_..." }` to
+`<storageDirectory>/pica-credentials.json` yourself.
 
 The key is read from the SDK storage directory and is **never** written into your `.als` Set.
 
