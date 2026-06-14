@@ -23,6 +23,7 @@ import {
   type ExistingCredit,
 } from "./pica/credits";
 import { messageHtml, linkMessageHtml, successBody } from "./dialogHtml";
+import { connectAndStoreKey } from "./pica/connect";
 
 const BASE_URL = "https://withpica.com";
 const PANEL_W = 380;
@@ -53,14 +54,10 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     await showError(context, "No storage directory available — cannot read the PICA key.");
     return;
   }
-  const apiKey = await readApiKey(storageDir);
+  let apiKey = await readApiKey(storageDir);
   if (!apiKey) {
-    await showError(
-      context,
-      "No PICA key found. Create a write:catalog key in PICA → settings → connection, then save it to:\n" +
-        storageDir + "/pica-credentials.json  →  { \"apiKey\": \"...\" }",
-    );
-    return;
+    apiKey = await connectAndStoreKey(context, storageDir);
+    if (!apiKey) return; // user backed out — no error dialog
   }
 
   // 1. Read the whole Set (independent of the right-clicked track).
