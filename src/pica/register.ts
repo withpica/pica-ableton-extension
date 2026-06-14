@@ -119,16 +119,16 @@ export async function registerSet(client: PicaMcpClient, input: RegisterInput): 
   }
 
   // 3. Create the master recording linked to the work.
-  const recording = await client.callTool<{ id: string }>("pica_recordings_create", {
+  const { recordingId } = await createRecordingForWork(client, {
+    workId: work.id,
     title: input.title,
-    artist_name: input.artistName,
-    version_type: "master",
-    work_id: work.id,
+    artistName: input.artistName,
+    versionType: "master",
   });
 
   return {
     workId: work.id,
-    recordingId: recording.id,
+    recordingId,
     completenessScore: work.completeness_score,
     inspectUrl: `https://withpica.com/inspect/works/${work.id}`,
   };
