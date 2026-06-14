@@ -34,7 +34,9 @@ describe("registerSet", () => {
     c.callTool
       .mockResolvedValueOnce([]) // pica_works_query → real client returns the unwrapped array
       .mockResolvedValueOnce({ id: "w1", completeness_score: 12 }) // works_create
-      .mockResolvedValueOnce({ id: "r1" }); // recordings_create
+      .mockResolvedValueOnce({ id: "r1" }) // recordings_create
+      .mockResolvedValueOnce([]) // splits_list → none
+      .mockResolvedValueOnce({ id: "s1" }); // splits_create
 
     const out = await registerSet(c, input);
 
@@ -45,10 +47,27 @@ describe("registerSet", () => {
     expect(c.callTool).toHaveBeenNthCalledWith(3, "pica_recordings_create", expect.objectContaining({
       title: "Night Drive", artist_name: "Dinachi", version_type: "master", work_id: "w1",
     }));
+    expect(c.callTool).toHaveBeenNthCalledWith(4, "pica_recording_splits_list", { recording_id: "r1" });
+    expect(c.callTool).toHaveBeenNthCalledWith(5, "pica_recording_splits_create", {
+      recording_id: "r1", split_type: "master", percentage: 100, role: "owner",
+    });
     expect(out).toEqual({
       workId: "w1", recordingId: "r1", completenessScore: 12,
       inspectUrl: "https://withpica.com/inspect/works/w1",
+      masterOwnership: "created",
     });
+  });
+
+  it("skips the master split when the recording already has one (re-register)", async () => {
+    const c = fakeClient();
+    c.callTool
+      .mockResolvedValueOnce([]) // works_query
+      .mockResolvedValueOnce({ id: "w1" }) // works_create
+      .mockResolvedValueOnce({ id: "r1" }) // recordings_create
+      .mockResolvedValueOnce([{ split_type: "master" }]); // splits_list → already owned
+    const out = await registerSet(c, input);
+    expect(out.masterOwnership).toBe("skipped_existing");
+    expect(c.callTool).toHaveBeenCalledTimes(4); // no splits_create
   });
 
   // Real prod shape captured 2026-06-12: pica_works_query returns {count, items, ...}.
