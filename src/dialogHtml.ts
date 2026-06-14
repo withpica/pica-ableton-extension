@@ -79,11 +79,25 @@ export function pasteKeyHtml(): string {
 }
 
 /** Success dialog body: an unambiguous "it's in PICA" + a non-alarming completeness line. */
-export function successBody(completenessScore?: number): string {
+export function successBody(
+  completenessScore?: number,
+  masterOwnership?: "created" | "skipped_existing" | "failed",
+): string {
   const lines = ["the work and its master recording are now in your catalog."];
   if (typeof completenessScore === "number") {
     lines.push(
       `completeness ${completenessScore}% — normal for a fresh registration; it grows as you add credits, identifiers and audio.`,
+    );
+  }
+  if (masterOwnership === "created") {
+    lines.push(
+      "master ownership: your org now owns 100% of this master — refine splits in PICA.",
+    );
+  } else if (masterOwnership === "skipped_existing") {
+    lines.push("master ownership: already set.");
+  } else if (masterOwnership === "failed") {
+    lines.push(
+      "master ownership could not be saved automatically — set it in PICA.",
     );
   }
   return lines.join("\n");
