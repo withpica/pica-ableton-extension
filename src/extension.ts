@@ -13,6 +13,8 @@ import {
   registerSet,
   findExistingRegistration,
   DuplicateWorkError,
+  createRecordingForWork,
+  NEW_VERSION_TYPES,
 } from "./pica/register";
 import {
   buildPrefillRows,
@@ -22,12 +24,14 @@ import {
   type CreditRow,
   type ExistingCredit,
 } from "./pica/credits";
-import { messageHtml, linkMessageHtml, successBody } from "./dialogHtml";
-import { connectAndStoreKey, withReconnect } from "./pica/connect";
+import { messageHtml, linkMessageHtml, successBody, duplicateChoiceHtml } from "./dialogHtml";
+import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
 
 const BASE_URL = "https://withpica.com";
 const PANEL_W = 380;
 const PANEL_H = 460;
+const CHOICE_W = 420;
+const CHOICE_H = 320;
 
 export function activate(activation: ActivationContext): void {
   // Capture the host API version from the ActivationContext before initialize consumes it.
@@ -128,33 +132,53 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     },
   ).catch(async (e: unknown) => {
     if (e instanceof DuplicateWorkError) {
-      // Re-run on an already-registered Set: open the checklist prefilled
-      // from the credits already saved on the master recording.
-      const workUrl = `${BASE_URL}/inspect/works/${e.existingWorkId}`;
-      try {
-        const found = await findExistingRegistration(client, answer.title!);
-        if (found?.recordingId) {
-          const existing = await loadExistingCredits(client, found.recordingId);
-          const parts = deriveParts(snapshot);
-          await runCreditsFlow(
-            context,
-            runWithClient,
-            found.recordingId,
-            buildPrefillRows(parts, existing),
-            existing,
-          );
-          return undefined;
-        }
-      } catch {
-        // fall through to the plain already-registered dialog
-      }
-      await showLink(
-        context,
-        "pica — already registered",
-        "a work with this title already exists in your catalog.",
-        workUrl,
+      const raw = await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(duplicateChoiceHtml(answer.title!, NEW_VERSION_TYPES))}`,
+        CHOICE_W,
+        CHOICE_H,
       );
-      return undefined;
+      const choice = safeParse(raw); // {} on close → treated as cancel
+      const parts = deriveParts(snapshot);
+
+      if (choice.action === "newVersion") {
+        const versionType = NEW_VERSION_TYPES.includes(choice.versionType as never)
+          ? (choice.versionType as string)
+          : "alternate";
+        const { recordingId } = await runWithClient((c) =>
+          createRecordingForWork(c, {
+            workId: e.existingWorkId,
+            title: answer.title!,
+            artistName: answer.artistName!,
+            versionType,
+          }),
+        );
+        await runCreditsFlow(context, runWithClient, recordingId, buildPrefillRows(parts, []), []);
+        return undefined;
+      }
+
+      if (choice.action === "existing") {
+        const found = await findExistingRegistration(client, answer.title!);
+        let recordingId = found?.recordingId ?? null;
+        let existing: ExistingCredit[] = [];
+        if (recordingId) {
+          existing = await loadExistingCredits(client, recordingId);
+        } else {
+          // Work exists without a recording → complete it: create the master.
+          const created = await runWithClient((c) =>
+            createRecordingForWork(c, {
+              workId: e.existingWorkId,
+              title: answer.title!,
+              artistName: answer.artistName!,
+              versionType: "master",
+            }),
+          );
+          recordingId = created.recordingId;
+        }
+        await runCreditsFlow(context, runWithClient, recordingId, buildPrefillRows(parts, existing), existing);
+        return undefined;
+      }
+
+      return undefined; // cancel / unparseable
     }
     throw e;
   });
