@@ -130,7 +130,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           const parts = deriveParts(snapshot);
           await runCreditsFlow(
             context,
-            client,
+            runWithClient,
             found.recordingId,
             buildPrefillRows(parts, existing),
             existing,
@@ -163,7 +163,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     const parts = deriveParts(snapshot);
     await runCreditsFlow(
       context,
-      client,
+      runWithClient,
       r.recordingId,
       buildPrefillRows(parts, []),
       [],
@@ -191,10 +191,13 @@ function formatOutcomes(outcomes: CreditOutcome[]): string {
   return lines.join("\n");
 }
 
+/** A reconnect-aware runner: builds a client (possibly from a fresh key) and runs `fn`. */
+type ClientRunner = <T>(fn: (c: PicaMcpClient) => Promise<T>) => Promise<T>;
+
 /** The Stage-2 checklist: parts → panel → per-row credit writes → outcome report. */
 async function runCreditsFlow(
   context: ExtensionContext<"1.0.0">,
-  client: PicaMcpClient,
+  run: ClientRunner,
   recordingId: string,
   prefillRows: CreditRow[],
   existing: ExistingCredit[],
@@ -221,7 +224,7 @@ async function runCreditsFlow(
   const outcomes = (await context.ui.withinProgressDialog(
     "saving credits…",
     { progress: 30 },
-    async () => saveCredits(client, recordingId, answer.rows!, existing),
+    async () => run((c) => saveCredits(c, recordingId, answer.rows!, existing)),
   )) as CreditOutcome[];
 
   // Link the RECORDING page — that's where recording credits render in
