@@ -24,3 +24,48 @@ export function safeParse(raw: string): Record<string, unknown> {
     return {};
   }
 }
+
+/** Open the paste-key dialog; persist + return a shaped key, else null. */
+async function promptAndStorePastedKey(
+  context: ExtensionContext<"1.0.0">,
+  storageDir: string,
+): Promise<string | null> {
+  const raw = await context.ui.showModalDialog(
+    `data:text/html,${encodeURIComponent(pasteKeyHtml())}`,
+    PASTE_W,
+    PASTE_H,
+  );
+  const parsed = safeParse(raw);
+  const key = typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
+  if (!isKeyShaped(key)) return null;
+  await writeApiKey(storageDir, key);
+  return key;
+}
+
+/**
+ * Run the Connect flow: open /connect/ableton in the host webview, collect the
+ * key by bridge (Mode A) or, on an explicit "open in browser", by paste (Mode C).
+ * Persists and returns the key, or null if the user backed out.
+ */
+export async function connectAndStoreKey(
+  context: ExtensionContext<"1.0.0">,
+  storageDir: string,
+): Promise<string | null> {
+  const raw = await context.ui.showModalDialog(
+    `${BASE_URL}/connect/ableton?host=ableton`,
+    CONNECT_W,
+    CONNECT_H,
+  );
+  const parsed = safeParse(raw);
+
+  if (typeof parsed.apiKey === "string" && isKeyShaped(parsed.apiKey)) {
+    await writeApiKey(storageDir, parsed.apiKey); // Mode A
+    return parsed.apiKey;
+  }
+  // Only an explicit "open in browser instead" opens the paste field. A plain
+  // cancel / window-close / unparseable result aborts quietly.
+  if (parsed.useBrowser === true) {
+    return promptAndStorePastedKey(context, storageDir);
+  }
+  return null;
+}
