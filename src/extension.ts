@@ -87,13 +87,21 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   const client = new PicaMcpClient({ baseUrl: BASE_URL, apiKey });
   const liveVersion = hostApiVersion ? `(api ${hostApiVersion})` : "";
 
+  // Hold the live key in a mutable local so one reconnect (register OR credits
+  // phase) carries the fresh key forward to every later call in this run —
+  // avoids a second Connect prompt when the register phase already re-keyed.
+  let currentKey = apiKey!;
+
   // Build the client lazily so a 401 mid-register can reconnect and swap the key.
   const runWithClient = <T>(fn: (c: PicaMcpClient) => Promise<T>) =>
     withReconnect(
       context,
       storageDir,
       (key: string) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key })),
-      apiKey!,
+      currentKey,
+      (fresh) => {
+        currentKey = fresh;
+      },
     );
 
   const result = await context.ui.withinProgressDialog(

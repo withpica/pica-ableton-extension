@@ -134,4 +134,26 @@ describe("withReconnect", () => {
     ).rejects.toThrow("server error");
     expect(showModalDialog).not.toHaveBeenCalled();
   });
+
+  it("invokes onReconnect with the fresh key on a 401", async () => {
+    const { ctx } = fakeContext([JSON.stringify({ apiKey: KEY })]);
+    const make = vi
+      .fn()
+      .mockRejectedValueOnce(new PicaMcpError("unauthorised", "401"))
+      .mockResolvedValueOnce("ok");
+    const onReconnect = vi.fn();
+    const out = await withReconnect(ctx, "/tmp/store", make, "old-key", onReconnect);
+    expect(out).toBe("ok");
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+    expect(onReconnect).toHaveBeenCalledWith(KEY);
+  });
+
+  it("does not invoke onReconnect when make succeeds first try", async () => {
+    const { ctx } = fakeContext([]);
+    const make = vi.fn().mockResolvedValueOnce("ok");
+    const onReconnect = vi.fn();
+    const out = await withReconnect(ctx, "/tmp/store", make, "old-key", onReconnect);
+    expect(out).toBe("ok");
+    expect(onReconnect).not.toHaveBeenCalled();
+  });
 });

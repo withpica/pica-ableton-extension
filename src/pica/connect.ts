@@ -80,13 +80,18 @@ export async function withReconnect<T>(
   storageDir: string,
   make: (key: string) => Promise<T>,
   key: string,
+  onReconnect?: (freshKey: string) => void,
 ): Promise<T> {
   try {
     return await make(key);
   } catch (e) {
+    // Matches HTTP 401 only: PicaMcpError.code is the stringified HTTP status
+    // (mcpClient.ts), and a bearer rejection on /api/mcp is a real HTTP 401.
     if (e instanceof PicaMcpError && e.code === "401") {
       const fresh = await connectAndStoreKey(context, storageDir);
       if (!fresh) throw e;
+      // Let the caller carry the fresh key into subsequent calls in this run.
+      onReconnect?.(fresh);
       return make(fresh);
     }
     throw e;
