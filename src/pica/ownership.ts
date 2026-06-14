@@ -24,7 +24,13 @@ export function masterSplitPayload(recordingId: string): Record<string, unknown>
   };
 }
 
-/** Normalise pica_recording_splits_list output (array | {data} | {splits} | {items}) to a list. */
+/**
+ * Normalise pica_recording_splits_list output to a list. Through `callTool` the
+ * result arrives already envelope-unwrapped (mcpClient peels a top-level
+ * `{data}`), so in the `ensureMasterOwnership` path the input is the bare array
+ * or a `{splits}` / `{items}` shape. The `{data}` arm is a defensive backstop
+ * for any direct caller and harmless if unreachable via callTool.
+ */
 export function asSplitArray(result: unknown): Array<{ split_type?: string }> {
   if (Array.isArray(result)) return result as Array<{ split_type?: string }>;
   const obj = result as { splits?: unknown; data?: unknown; items?: unknown } | null;

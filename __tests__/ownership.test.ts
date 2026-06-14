@@ -75,4 +75,12 @@ describe("ensureMasterOwnership", () => {
     c.callTool.mockRejectedValueOnce(new PicaMcpError("unauthorized", "401"));
     await expect(ensureMasterOwnership(c, "r1")).rejects.toBeInstanceOf(PicaMcpError);
   });
+
+  it("rethrows a 401 from splits_create too (not just splits_list)", async () => {
+    const c = fakeClient();
+    c.callTool
+      .mockResolvedValueOnce([]) // splits_list → no master
+      .mockRejectedValueOnce(new PicaMcpError("unauthorized", "401")); // splits_create
+    await expect(ensureMasterOwnership(c, "r1")).rejects.toBeInstanceOf(PicaMcpError);
+  });
 });
