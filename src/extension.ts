@@ -24,6 +24,7 @@ import {
 } from "./pica/credits";
 import { messageHtml, linkMessageHtml, successBody } from "./dialogHtml";
 import { connectAndStoreKey, withReconnect } from "./pica/connect";
+import type { MasterOwnershipOutcome } from "./pica/ownership";
 
 const BASE_URL = "https://withpica.com";
 const PANEL_W = 380;
@@ -161,8 +162,14 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
 
   if (!result || typeof result !== "object" || !("inspectUrl" in result)) return;
 
-  const r = result as { workId: string; recordingId: string; completenessScore?: number; inspectUrl: string };
-  await showLink(context, "pica — registered", successBody(r.completenessScore), r.inspectUrl);
+  const r = result as {
+    workId: string;
+    recordingId: string;
+    completenessScore?: number;
+    inspectUrl: string;
+    masterOwnership?: MasterOwnershipOutcome["status"];
+  };
+  await showLink(context, "pica — registered", successBody(r.completenessScore, r.masterOwnership), r.inspectUrl);
 
   // Stage 2: offer the attribution checklist right after register (skippable).
   // Best-effort: the registration already succeeded — a checklist failure must
