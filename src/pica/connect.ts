@@ -3,6 +3,7 @@
 import type { ExtensionContext } from "@ableton-extensions/sdk";
 import { writeApiKey } from "./keyStore";
 import { pasteKeyHtml } from "../dialogHtml";
+import { PicaMcpError } from "./mcpClient";
 
 const BASE_URL = "https://withpica.com";
 const CONNECT_W = 420;
@@ -68,4 +69,26 @@ export async function connectAndStoreKey(
     return promptAndStorePastedKey(context, storageDir);
   }
   return null;
+}
+
+/**
+ * Run `make(key)`; on a 401 PicaMcpError, run Connect once for a fresh key and
+ * retry exactly once. A declined reconnect or a non-401 error propagates.
+ */
+export async function withReconnect<T>(
+  context: ExtensionContext<"1.0.0">,
+  storageDir: string,
+  make: (key: string) => Promise<T>,
+  key: string,
+): Promise<T> {
+  try {
+    return await make(key);
+  } catch (e) {
+    if (e instanceof PicaMcpError && e.code === "401") {
+      const fresh = await connectAndStoreKey(context, storageDir);
+      if (!fresh) throw e;
+      return make(fresh);
+    }
+    throw e;
+  }
 }

@@ -23,7 +23,7 @@ import {
   type ExistingCredit,
 } from "./pica/credits";
 import { messageHtml, linkMessageHtml, successBody } from "./dialogHtml";
-import { connectAndStoreKey } from "./pica/connect";
+import { connectAndStoreKey, withReconnect } from "./pica/connect";
 
 const BASE_URL = "https://withpica.com";
 const PANEL_W = 380;
@@ -87,20 +87,35 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   const client = new PicaMcpClient({ baseUrl: BASE_URL, apiKey });
   const liveVersion = hostApiVersion ? `(api ${hostApiVersion})` : "";
 
+  // Build the client lazily so a 401 mid-register can reconnect and swap the key.
+  const runWithClient = <T>(fn: (c: PicaMcpClient) => Promise<T>) =>
+    withReconnect(
+      context,
+      storageDir,
+      (key: string) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key })),
+      apiKey!,
+    );
+
   const result = await context.ui.withinProgressDialog(
     "Registering in PICA…",
     { progress: 10 },
     async (update) => {
-      await update("Declaring agent identity…", 25);
-      await ensureIntroduced(client, liveVersion);
-      await update("Registering work + master recording…", 65);
-      return registerSet(client, {
-        title: answer.title!,
-        artistName: answer.artistName!,
-        workType: answer.workType || "song",
-        key: answer.key || derivedKey,
-        metadata,
-        summary,
+      // ensureIntroduced + registerSet are the register-phase network calls; run
+      // them through the reconnect wrapper so a 401 mints a fresh key once and
+      // retries (the whole pair re-runs on retry). A DuplicateWorkError is not a
+      // 401 → it propagates unchanged to the catch below.
+      return runWithClient(async (c) => {
+        await update("Declaring agent identity…", 25);
+        await ensureIntroduced(c, liveVersion);
+        await update("Registering work + master recording…", 65);
+        return registerSet(c, {
+          title: answer.title!,
+          artistName: answer.artistName!,
+          workType: answer.workType || "song",
+          key: answer.key || derivedKey,
+          metadata,
+          summary,
+        });
       });
     },
   ).catch(async (e: unknown) => {

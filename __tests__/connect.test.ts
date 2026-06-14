@@ -4,7 +4,9 @@ import {
   isKeyShaped,
   safeParse,
   connectAndStoreKey,
+  withReconnect,
 } from "../src/pica/connect";
+import { PicaMcpError } from "../src/pica/mcpClient";
 
 vi.mock("../src/pica/keyStore", () => ({
   writeApiKey: vi.fn(async () => {}),
@@ -93,5 +95,43 @@ describe("connectAndStoreKey", () => {
     const out = await connectAndStoreKey(ctx, "/tmp/store");
     expect(out).toBeNull();
     expect(writeApiKey).not.toHaveBeenCalled();
+  });
+});
+
+describe("withReconnect", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("reconnects once on a 401 then retries with the fresh key", async () => {
+    const { ctx } = fakeContext([JSON.stringify({ apiKey: KEY })]); // connect returns KEY
+    const make = vi
+      .fn()
+      .mockRejectedValueOnce(new PicaMcpError("unauthorised", "401"))
+      .mockResolvedValueOnce("ok");
+    const out = await withReconnect(ctx, "/tmp/store", make, "old-key");
+    expect(out).toBe("ok");
+    expect(make).toHaveBeenNthCalledWith(1, "old-key");
+    expect(make).toHaveBeenNthCalledWith(2, KEY);
+  });
+
+  it("rethrows the 401 if the user declines to reconnect", async () => {
+    const { ctx } = fakeContext([JSON.stringify({ cancelled: true })]); // connect returns null
+    const make = vi
+      .fn()
+      .mockRejectedValue(new PicaMcpError("unauthorised", "401"));
+    await expect(
+      withReconnect(ctx, "/tmp/store", make, "old-key"),
+    ).rejects.toThrow("unauthorised");
+    expect(make).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reconnect on a non-401 error", async () => {
+    const { ctx, showModalDialog } = fakeContext([]);
+    const make = vi
+      .fn()
+      .mockRejectedValue(new PicaMcpError("server error", "500"));
+    await expect(
+      withReconnect(ctx, "/tmp/store", make, "old-key"),
+    ).rejects.toThrow("server error");
+    expect(showModalDialog).not.toHaveBeenCalled();
   });
 });
