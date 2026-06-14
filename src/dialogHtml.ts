@@ -14,8 +14,15 @@ export function escapeHtml(s: string): string {
   );
 }
 
-const CLOSE_JS =
-  "(window.webkit&&webkit.messageHandlers.live?webkit.messageHandlers.live:chrome.webview).postMessage({method:'close_and_send',params:['ok']})";
+/** JS expression (string) that posts `payloadExpr` back to the host and closes. */
+function bridgeSend(payloadExpr: string): string {
+  return (
+    "(window.webkit&&webkit.messageHandlers.live?webkit.messageHandlers.live:chrome.webview)" +
+    `.postMessage({method:'close_and_send',params:[${payloadExpr}]})`
+  );
+}
+
+const CLOSE_JS = bridgeSend("'ok'");
 
 const BASE_STYLE =
   "margin:0;background:#0A0A0A;color:#EDEDED;font:13px ui-monospace,Menlo,monospace;" +
@@ -50,6 +57,24 @@ export function linkMessageHtml(title: string, body: string, url: string): strin
     `<a id="u" href="${safeUrl}" target="_blank" style="color:#B87333">${safeUrl}</a></div>` +
     `<div style="margin-top:12px"><button onclick="${escapeHtml(copyJs)}">copy link</button> ` +
     `<button onclick="${CLOSE_JS}">close</button></div>`
+  );
+}
+
+/** Paste-key dialog: one input + connect/cancel buttons, both bridging via close_and_send. */
+export function pasteKeyHtml(): string {
+  const connectJs = bridgeSend(
+    "JSON.stringify({apiKey:document.getElementById('k').value.trim()})",
+  );
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  return (
+    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<div style="color:#B87333;margin-bottom:8px">pica — paste your connection key</div>` +
+    `paste the withpica_live_… key you copied from the browser:` +
+    `<div style="margin-top:10px"><input id="k" placeholder="withpica_live_…" ` +
+    `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;` +
+    `border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></div>` +
+    `<div style="margin-top:12px"><button onclick="${escapeHtml(connectJs)}">connect</button> ` +
+    `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
   );
 }
 

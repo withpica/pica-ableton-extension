@@ -23,6 +23,7 @@ import {
   type ExistingCredit,
 } from "./pica/credits";
 import { messageHtml, linkMessageHtml, successBody } from "./dialogHtml";
+import { connectAndStoreKey, withReconnect } from "./pica/connect";
 
 const BASE_URL = "https://withpica.com";
 const PANEL_W = 380;
@@ -53,14 +54,10 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     await showError(context, "No storage directory available — cannot read the PICA key.");
     return;
   }
-  const apiKey = await readApiKey(storageDir);
+  let apiKey = await readApiKey(storageDir);
   if (!apiKey) {
-    await showError(
-      context,
-      "No PICA key found. Create a write:catalog key in PICA → settings → connection, then save it to:\n" +
-        storageDir + "/pica-credentials.json  →  { \"apiKey\": \"...\" }",
-    );
-    return;
+    apiKey = await connectAndStoreKey(context, storageDir);
+    if (!apiKey) return; // user backed out — no error dialog
   }
 
   // 1. Read the whole Set (independent of the right-clicked track).
@@ -90,20 +87,43 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   const client = new PicaMcpClient({ baseUrl: BASE_URL, apiKey });
   const liveVersion = hostApiVersion ? `(api ${hostApiVersion})` : "";
 
+  // Hold the live key in a mutable local so one reconnect (register OR credits
+  // phase) carries the fresh key forward to every later call in this run —
+  // avoids a second Connect prompt when the register phase already re-keyed.
+  let currentKey = apiKey!;
+
+  // Build the client lazily so a 401 mid-register can reconnect and swap the key.
+  const runWithClient = <T>(fn: (c: PicaMcpClient) => Promise<T>) =>
+    withReconnect(
+      context,
+      storageDir,
+      (key: string) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key })),
+      currentKey,
+      (fresh) => {
+        currentKey = fresh;
+      },
+    );
+
   const result = await context.ui.withinProgressDialog(
     "Registering in PICA…",
     { progress: 10 },
     async (update) => {
-      await update("Declaring agent identity…", 25);
-      await ensureIntroduced(client, liveVersion);
-      await update("Registering work + master recording…", 65);
-      return registerSet(client, {
-        title: answer.title!,
-        artistName: answer.artistName!,
-        workType: answer.workType || "song",
-        key: answer.key || derivedKey,
-        metadata,
-        summary,
+      // ensureIntroduced + registerSet are the register-phase network calls; run
+      // them through the reconnect wrapper so a 401 mints a fresh key once and
+      // retries (the whole pair re-runs on retry). A DuplicateWorkError is not a
+      // 401 → it propagates unchanged to the catch below.
+      return runWithClient(async (c) => {
+        await update("Declaring agent identity…", 25);
+        await ensureIntroduced(c, liveVersion);
+        await update("Registering work + master recording…", 65);
+        return registerSet(c, {
+          title: answer.title!,
+          artistName: answer.artistName!,
+          workType: answer.workType || "song",
+          key: answer.key || derivedKey,
+          metadata,
+          summary,
+        });
       });
     },
   ).catch(async (e: unknown) => {
@@ -118,7 +138,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           const parts = deriveParts(snapshot);
           await runCreditsFlow(
             context,
-            client,
+            runWithClient,
             found.recordingId,
             buildPrefillRows(parts, existing),
             existing,
@@ -151,7 +171,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     const parts = deriveParts(snapshot);
     await runCreditsFlow(
       context,
-      client,
+      runWithClient,
       r.recordingId,
       buildPrefillRows(parts, []),
       [],
@@ -179,10 +199,13 @@ function formatOutcomes(outcomes: CreditOutcome[]): string {
   return lines.join("\n");
 }
 
+/** A reconnect-aware runner: builds a client (possibly from a fresh key) and runs `fn`. */
+type ClientRunner = <T>(fn: (c: PicaMcpClient) => Promise<T>) => Promise<T>;
+
 /** The Stage-2 checklist: parts → panel → per-row credit writes → outcome report. */
 async function runCreditsFlow(
   context: ExtensionContext<"1.0.0">,
-  client: PicaMcpClient,
+  run: ClientRunner,
   recordingId: string,
   prefillRows: CreditRow[],
   existing: ExistingCredit[],
@@ -209,7 +232,7 @@ async function runCreditsFlow(
   const outcomes = (await context.ui.withinProgressDialog(
     "saving credits…",
     { progress: 30 },
-    async () => saveCredits(client, recordingId, answer.rows!, existing),
+    async () => run((c) => saveCredits(c, recordingId, answer.rows!, existing)),
   )) as CreditOutcome[];
 
   // Link the RECORDING page — that's where recording credits render in

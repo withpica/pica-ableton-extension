@@ -1,6 +1,6 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
-import type { PicaMcpClient } from "./mcpClient";
+import { PicaMcpError, type PicaMcpClient } from "./mcpClient";
 import type { Part } from "../session/parts";
 
 export interface CreditRow {
@@ -151,6 +151,13 @@ export async function saveCredits(
         status: created?.person_id ? "saved_linked" : "saved_draft",
       });
     } catch (e) {
+      // A 401 must reach withReconnect so it can mint a fresh key and re-run
+      // the whole list. Rethrow (aborting the loop) rather than recording a
+      // failed outcome that would swallow the auth signal. Safe to re-run:
+      // credit writes are insert-only and de-duplicated (the skipped_existing
+      // check + the DB UNIQUE (recording_id, credited_name, role) constraint),
+      // so already-written rows are skipped on the retry — no double-write.
+      if (e instanceof PicaMcpError && e.code === "401") throw e;
       outcomes.push({
         creditedName: m.performerName,
         instrument: m.instrument,

@@ -10,6 +10,7 @@ import {
   type ExistingCredit,
 } from "../src/pica/credits";
 import type { Part } from "../src/session/parts";
+import { PicaMcpError } from "../src/pica/mcpClient";
 
 function fakeClient() {
   return { callTool: vi.fn() } as unknown as import("../src/pica/mcpClient").PicaMcpClient & {
@@ -138,6 +139,29 @@ describe("saveCredits", () => {
     const outcomes = await saveCredits(c, "rec-1", rows, []);
 
     expect(outcomes[0]).toMatchObject({ status: "failed", error: "boom" });
+    expect(outcomes[1]).toMatchObject({ status: "saved_draft" });
+  });
+
+  it("rethrows a 401 PicaMcpError (so withReconnect can reconnect) instead of recording a failed outcome", async () => {
+    const c = fakeClient();
+    c.callTool.mockRejectedValueOnce(new PicaMcpError("unauthorised", "401"));
+
+    await expect(saveCredits(c, "rec-1", rows, [])).rejects.toBeInstanceOf(
+      PicaMcpError,
+    );
+    // aborted on the first row — the second row never ran
+    expect(c.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("records a failed outcome (does NOT rethrow) for a non-401 PicaMcpError", async () => {
+    const c = fakeClient();
+    c.callTool
+      .mockRejectedValueOnce(new PicaMcpError("server error", "500"))
+      .mockResolvedValueOnce({ id: "rc-2", person_id: null });
+
+    const outcomes = await saveCredits(c, "rec-1", rows, []);
+
+    expect(outcomes[0]).toMatchObject({ status: "failed", error: "server error" });
     expect(outcomes[1]).toMatchObject({ status: "saved_draft" });
   });
 });
