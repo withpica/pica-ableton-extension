@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escapeHtml, messageHtml, linkMessageHtml, successBody } from "../src/dialogHtml";
+import { escapeHtml, messageHtml, linkMessageHtml, successBody, pasteKeyHtml } from "../src/dialogHtml";
 
 describe("escapeHtml", () => {
   it("escapes &, <, > and quotes", () => {
@@ -52,5 +52,18 @@ describe("successBody", () => {
     const body = successBody(undefined);
     expect(body).toContain("now in your catalog");
     expect(body).not.toContain("completeness");
+  });
+});
+
+describe("pasteKeyHtml", () => {
+  it("renders a key input and a connect button that bridges {apiKey}", () => {
+    const html = pasteKeyHtml();
+    expect(html).toContain('id="k"');
+    expect(html).toContain("close_and_send");
+    expect(html).toContain("apiKey");
+  });
+
+  it("renders a cancel button that bridges {cancelled:true}", () => {
+    expect(pasteKeyHtml()).toContain("cancelled");
   });
 });
