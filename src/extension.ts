@@ -29,6 +29,7 @@ import {
   type PrefillNode,
 } from "./pica/credits";
 import { saveWriters, type WriterOutcome } from "./pica/writers";
+import { fetchPeopleCandidates, candidateNames } from "./pica/people";
 import { detectSpliceSamples, saveSpliceSamples } from "./pica/samples";
 import {
   messageHtml,
@@ -316,9 +317,11 @@ async function runCreditsFlow(
   existing: ExistingCredit[],
 ): Promise<StepResult<CreditOutcome>> {
   const prefillJson = JSON.stringify({ tree: prefillNodes }).replace(/</g, "\\u003c");
+  const candidates = await run(fetchPeopleCandidates).catch(() => []);
+  const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
   const injected = creditsHtml.replace(
     "</head>",
-    `<script>window.__PICA_PREFILL__ = ${prefillJson};</script></head>`,
+    `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
   );
   const raw = await context.ui.showModalDialog(
     `data:text/html,${encodeURIComponent(injected)}`,
@@ -338,7 +341,7 @@ async function runCreditsFlow(
     const outcomes = (await context.ui.withinProgressDialog(
       "saving credits…",
       { progress: 30 },
-      async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing)),
+      async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing, candidates)),
     )) as CreditOutcome[];
     return { state: "saved", outcomes };
   } catch (e) {
@@ -352,8 +355,14 @@ async function runWritersFlow(
   run: ClientRunner,
   workId: string,
 ): Promise<StepResult<WriterOutcome>> {
+  const candidates = await run(fetchPeopleCandidates).catch(() => []);
+  const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
+  const injected = writersHtml.replace(
+    "</head>",
+    `<script>window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
+  );
   const raw = await context.ui.showModalDialog(
-    `data:text/html,${encodeURIComponent(writersHtml)}`,
+    `data:text/html,${encodeURIComponent(injected)}`,
     WRITERS_W,
     WRITERS_H,
   );
