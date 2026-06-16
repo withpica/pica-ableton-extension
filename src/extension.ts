@@ -28,9 +28,15 @@ import {
   type FrontierNode,
   type PrefillNode,
 } from "./pica/credits";
-import { saveWriters, summarizeWriters, type WriterOutcome } from "./pica/writers";
+import { saveWriters, type WriterOutcome } from "./pica/writers";
 import { detectSpliceSamples, saveSpliceSamples } from "./pica/samples";
-import { messageHtml, linkMessageHtml, successBody, duplicateChoiceHtml } from "./dialogHtml";
+import {
+  messageHtml,
+  finalReportHtml,
+  duplicateChoiceHtml,
+  type RegisterReport,
+  type StepResult,
+} from "./dialogHtml";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
 import type { MasterOwnershipOutcome } from "./pica/ownership";
 
@@ -149,11 +155,13 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
 
       // RT-2: best-effort Splice capture whenever the Set is attributed to a
       // recording on the duplicate path (new version OR completing the existing
-      // master). Idempotent; no count is surfaced here.
-      const captureSplice = async (recId: string) => {
+      // master). Idempotent; returns the added count so the duplicate report can
+      // surface it (AC-6).
+      const captureSplice = async (recId: string): Promise<number> => {
         const samples = detectSpliceSamples(snapshot);
-        if (!samples.length) return;
-        await runWithClient((c) => saveSpliceSamples(c, recId, samples)).catch(() => undefined);
+        if (!samples.length) return 0;
+        const outcome = await runWithClient((c) => saveSpliceSamples(c, recId, samples)).catch(() => undefined);
+        return outcome?.added ?? 0;
       };
 
       if (choice.action === "newVersion") {
@@ -166,8 +174,16 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
             versionType,
           }),
         );
-        await captureSplice(recordingId);
-        await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, []), []);
+        const spliceLogged = await captureSplice(recordingId);
+        const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, []), []);
+        await showReport(context, {
+          action: "version",
+          title: answer.title!,
+          workId: e.existingWorkId,
+          recordingId,
+          spliceLogged,
+          credits,
+        });
         return undefined;
       }
 
@@ -191,8 +207,16 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           );
           recordingId = created.recordingId;
         }
-        await captureSplice(recordingId);
-        await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, existing), existing);
+        const spliceLogged = await captureSplice(recordingId);
+        const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, existing), existing);
+        await showReport(context, {
+          action: "existing",
+          title: answer.title!,
+          workId: e.existingWorkId,
+          recordingId,
+          spliceLogged,
+          credits,
+        });
         return undefined;
       }
 
@@ -206,7 +230,6 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   const r = result as {
     workId: string;
     recordingId: string;
-    completenessScore?: number;
     inspectUrl: string;
     masterOwnership?: MasterOwnershipOutcome["status"];
   };
@@ -222,51 +245,43 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     spliceLogged = spliceOutcome?.added ?? 0;
   }
 
-  await showLink(
-    context,
-    "pica — registered",
-    successBody(r.completenessScore, r.masterOwnership, spliceLogged),
-    r.inspectUrl,
-  );
-
-  // Stage 2: offer the attribution checklist right after register (skippable).
-  // Best-effort: the registration already succeeded — a checklist failure must
-  // not surface as an error dialog on top of the success dialog.
+  // Stage 2 + 3: offer the attribution + writers checklists right after register
+  // (both skippable). Best-effort: the registration already succeeded, so a
+  // checklist failure is captured into the report's StepResult, never an error
+  // dialog. Their outcomes feed the ONE consolidated final report below.
+  let credits: StepResult<CreditOutcome> | undefined;
   if (r.recordingId) {
     const tree = derivePartTree(snapshot);
-    await runCreditsFlow(
+    credits = await runCreditsFlow(
       context,
       runWithClient,
       r.recordingId,
       buildPrefillTree(tree, []),
       [],
-    ).catch(() => undefined);
+    ).catch((e) => ({ state: "error" as const, error: e instanceof Error ? e.message : String(e) }));
   }
 
-  await runWritersFlow(context, runWithClient, r.workId).catch(() => undefined);
+  const writers = await runWritersFlow(context, runWithClient, r.workId).catch(
+    (e) => ({ state: "error" as const, error: e instanceof Error ? e.message : String(e) }),
+  );
+
+  await showReport(context, {
+    action: "registered",
+    title: answer.title!,
+    workId: r.workId,
+    recordingId: r.recordingId,
+    masterOwnership: r.masterOwnership,
+    spliceLogged,
+    credits,
+    writers,
+  });
 }
 
 const CREDITS_W = 430;
 const CREDITS_H = 520;
 const WRITERS_W = 380;
 const WRITERS_H = 440;
-
-function formatOutcomes(outcomes: CreditOutcome[]): string {
-  if (outcomes.length === 0) return "no rows had a performer name — nothing saved.";
-  const lines = outcomes.map((o) => {
-    switch (o.status) {
-      case "saved_linked":
-        return `✓ ${o.creditedName} — ${o.instrument} (linked to existing person)`;
-      case "saved_draft":
-        return `✓ ${o.creditedName} — ${o.instrument} (draft — no matching person yet)`;
-      case "skipped_existing":
-        return `· ${o.creditedName} — already credited, left unchanged`;
-      case "failed":
-        return `✗ ${o.creditedName} — FAILED: ${o.error ?? "unknown error"}`;
-    }
-  });
-  return lines.join("\n");
-}
+const REPORT_H = 460;
 
 /** A reconnect-aware runner: builds a client (possibly from a fresh key) and runs `fn`. */
 type ClientRunner = <T>(fn: (c: PicaMcpClient) => Promise<T>) => Promise<T>;
@@ -278,7 +293,7 @@ async function runCreditsFlow(
   recordingId: string,
   prefillNodes: PrefillNode[],
   existing: ExistingCredit[],
-): Promise<void> {
+): Promise<StepResult<CreditOutcome>> {
   const prefillJson = JSON.stringify({ tree: prefillNodes }).replace(/</g, "\\u003c");
   const injected = creditsHtml.replace(
     "</head>",
@@ -294,25 +309,20 @@ async function runCreditsFlow(
   try {
     answer = JSON.parse(raw);
   } catch {
-    return; // dialog dismissed
+    return { state: "skipped" }; // dialog dismissed
   }
-  if (answer.cancelled || !Array.isArray(answer.tree)) return; // skip writes nothing
+  if (answer.cancelled || !Array.isArray(answer.tree)) return { state: "skipped" }; // skip writes nothing
 
-  const outcomes = (await context.ui.withinProgressDialog(
-    "saving credits…",
-    { progress: 30 },
-    async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing)),
-  )) as CreditOutcome[];
-
-  // Link the RECORDING page — that's where recording credits render in
-  // /inspect (the work page shows the composition side only; smoke-test
-  // finding 2026-06-12: a work-page link here reads as "credits missing").
-  await showLink(
-    context,
-    "pica — credits",
-    formatOutcomes(outcomes),
-    `${BASE_URL}/inspect/recordings/${recordingId}`,
-  );
+  try {
+    const outcomes = (await context.ui.withinProgressDialog(
+      "saving credits…",
+      { progress: 30 },
+      async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing)),
+    )) as CreditOutcome[];
+    return { state: "saved", outcomes };
+  } catch (e) {
+    return { state: "error", error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** The Stage-3 writers step: names-only panel → pica_work_writers_add → outcome report. */
@@ -320,7 +330,7 @@ async function runWritersFlow(
   context: ExtensionContext<"1.0.0">,
   run: ClientRunner,
   workId: string,
-): Promise<void> {
+): Promise<StepResult<WriterOutcome>> {
   const raw = await context.ui.showModalDialog(
     `data:text/html,${encodeURIComponent(writersHtml)}`,
     WRITERS_W,
@@ -331,22 +341,20 @@ async function runWritersFlow(
   try {
     answer = JSON.parse(raw);
   } catch {
-    return; // dialog dismissed
+    return { state: "skipped" }; // dialog dismissed
   }
-  if (answer.cancelled || !Array.isArray(answer.names)) return; // skip writes nothing
+  if (answer.cancelled || !Array.isArray(answer.names)) return { state: "skipped" }; // skip writes nothing
 
-  const outcomes = (await context.ui.withinProgressDialog(
-    "saving writers…",
-    { progress: 30 },
-    async () => run((c) => saveWriters(c, workId, answer.names!)),
-  )) as WriterOutcome[];
-
-  await showLink(
-    context,
-    "pica — writers",
-    summarizeWriters(outcomes) || "no writers added.",
-    `${BASE_URL}/inspect/works/${workId}`,
-  );
+  try {
+    const outcomes = (await context.ui.withinProgressDialog(
+      "saving writers…",
+      { progress: 30 },
+      async () => run((c) => saveWriters(c, workId, answer.names!)),
+    )) as WriterOutcome[];
+    return { state: "saved", outcomes };
+  } catch (e) {
+    return { state: "error", error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 async function showDialog(context: ExtensionContext<"1.0.0">, html: string, height: number): Promise<void> {
@@ -356,6 +364,8 @@ async function showDialog(context: ExtensionContext<"1.0.0">, html: string, heig
 function showError(context: ExtensionContext<"1.0.0">, body: string): Promise<void> {
   return showDialog(context, messageHtml("pica — error", body), 200);
 }
-function showLink(context: ExtensionContext<"1.0.0">, title: string, body: string, url: string): Promise<void> {
-  return showDialog(context, linkMessageHtml(title, body, url), 280);
+
+/** The ONE consolidated end-of-flow report: lead line + per-step outcomes + the three links. */
+function showReport(context: ExtensionContext<"1.0.0">, report: RegisterReport): Promise<void> {
+  return showDialog(context, finalReportHtml(report), REPORT_H);
 }

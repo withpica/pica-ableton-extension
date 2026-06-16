@@ -1,6 +1,8 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
 import type { MasterOwnershipOutcome } from "./pica/ownership";
+import { summarizeCredits, type CreditOutcome } from "./pica/credits";
+import { summarizeWriters, type WriterOutcome } from "./pica/writers";
 
 /**
  * Pure HTML builders for the extension's modal dialogs (host-independent,
@@ -9,6 +11,8 @@ import type { MasterOwnershipOutcome } from "./pica/ownership";
  * anchor (Live may forward it to the system browser), selectable text, and
  * a copy button backed by the webview clipboard with a select-fallback.
  */
+
+export const BASE_URL = "https://withpica.com";
 
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) =>
@@ -40,6 +44,16 @@ export function messageHtml(title: string, body: string): string {
     `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
     `<div style="color:#B87333;margin-bottom:8px">${escapeHtml(title)}</div>` +
     `${escapeHtml(body)}${closeButton()}`
+  );
+}
+
+/** JS (string) for a copy button that copies the textContent of `#${anchorId}`. */
+function copyLinkJs(anchorId: string): string {
+  return (
+    `var u=document.getElementById('${anchorId}');var b=this;` +
+    `function ok(){b.textContent='copied';setTimeout(function(){b.textContent='copy'},1500)}` +
+    `if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(u.textContent).then(ok,fallback)}else{fallback()}` +
+    `function fallback(){var r=document.createRange();r.selectNodeContents(u);var s=getSelection();s.removeAllRanges();s.addRange(r);try{document.execCommand('copy');ok()}catch(e){}}`
   );
 }
 
@@ -103,33 +117,95 @@ export function duplicateChoiceHtml(title: string, versionTypes: readonly string
   );
 }
 
-/** Success dialog body: an unambiguous "it's in PICA" + a non-alarming completeness line. */
-export function successBody(
-  completenessScore?: number,
-  masterOwnership?: MasterOwnershipOutcome["status"],
-  spliceSamples?: number,
-): string {
-  const lines = ["the work and its master recording are now in your catalog."];
-  if (typeof completenessScore === "number") {
-    lines.push(
-      `completeness ${completenessScore}% — normal for a fresh registration; it grows as you add credits, identifiers and audio.`,
-    );
+/** A captured step's honest end-state for the consolidated report. */
+export type StepResult<T> =
+  | { state: "skipped" }
+  | { state: "saved"; outcomes: T[] }
+  | { state: "error"; error: string };
+
+export interface RegisterReport {
+  action: "registered" | "version" | "existing";
+  title: string;
+  workId: string;
+  recordingId: string;
+  masterOwnership?: MasterOwnershipOutcome["status"];
+  spliceLogged?: number;
+  credits?: StepResult<CreditOutcome>;
+  writers?: StepResult<WriterOutcome>;
+}
+
+function leadLine(action: RegisterReport["action"], title: string): string {
+  const t = `"${title}"`;
+  switch (action) {
+    case "registered":
+      return `the work ${t} and its master recording are now in your catalog.`;
+    case "version":
+      return `registered ${t} as a new version in your catalog.`;
+    case "existing":
+      return `updated ${t} in your catalog.`;
   }
-  if (masterOwnership === "created") {
-    lines.push(
-      "master ownership: your org now owns 100% of this master. refine splits in PICA.",
-    );
-  } else if (masterOwnership === "skipped_existing") {
-    lines.push("master ownership: already set.");
-  } else if (masterOwnership === "failed") {
-    lines.push(
-      "master ownership: could not be saved automatically. set it in PICA.",
-    );
+}
+
+function ownershipLine(status?: MasterOwnershipOutcome["status"]): string | null {
+  switch (status) {
+    case "created":
+      return "master ownership: your org now owns 100% of this master. refine splits in PICA.";
+    case "skipped_existing":
+      return "master ownership: already set.";
+    case "failed":
+      return "master ownership: could not be saved automatically. set it in PICA.";
+    default:
+      return null;
   }
-  if (typeof spliceSamples === "number" && spliceSamples > 0) {
-    lines.push(
-      `splice samples: ${spliceSamples} logged (royalty-free — no clearance needed).`,
-    );
+}
+
+function creditsLine(c?: StepResult<CreditOutcome>): string | null {
+  if (!c) return null;
+  if (c.state === "skipped") return "credits: skipped.";
+  if (c.state === "error") return "credits: could not be saved.";
+  return summarizeCredits(c.outcomes);
+}
+
+function writersLine(w?: StepResult<WriterOutcome>): string | null {
+  if (!w) return null;
+  if (w.state === "skipped") return "writers: skipped.";
+  if (w.state === "error") return "writers: could not be saved.";
+  return summarizeWriters(w.outcomes) || "writers: none added.";
+}
+
+/** One link row: friendly anchor + selectable URL span + a copy button. */
+function reportLinkRow(label: string, url: string, idx: number): string {
+  const safeUrl = escapeHtml(url);
+  const id = `u${idx}`;
+  return (
+    `<div style="margin-top:10px;word-break:break-all">` +
+    `<a href="${safeUrl}" target="_blank" style="color:#B87333">${escapeHtml(label)}</a> ` +
+    `<span id="${id}" style="color:#888">${safeUrl}</span> ` +
+    `<button onclick="${escapeHtml(copyLinkJs(id))}">copy</button></div>`
+  );
+}
+
+/** The ONE consolidated report shown at the end of the register flow. */
+export function finalReportHtml(report: RegisterReport): string {
+  const lines: string[] = [leadLine(report.action, report.title)];
+  const own = ownershipLine(report.masterOwnership);
+  if (own) lines.push(own);
+  const cr = creditsLine(report.credits);
+  if (cr) lines.push(cr);
+  const wr = writersLine(report.writers);
+  if (wr) lines.push(wr);
+  if (report.spliceLogged && report.spliceLogged > 0) {
+    lines.push(`splice samples: ${report.spliceLogged} logged (royalty-free — no clearance needed).`);
   }
-  return lines.join("\n");
+  const links =
+    reportLinkRow("view the work", `${BASE_URL}/inspect/works/${report.workId}`, 0) +
+    reportLinkRow("view the recording", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
+    reportLinkRow("open your catalog", `${BASE_URL}/inspect`, 2);
+  return (
+    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<div style="color:#B87333;margin-bottom:8px">pica — registered</div>` +
+    `${escapeHtml(lines.join("\n"))}` +
+    `<div style="margin-top:14px">${links}</div>` +
+    closeButton()
+  );
 }
