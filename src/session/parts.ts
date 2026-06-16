@@ -3,21 +3,23 @@
 import type { SongSnapshot, TrackSnapshot } from "./snapshot";
 
 /**
- * A performed part of the Set — the unit the attribution checklist shows one
- * row for. Pure derivation from the snapshot: groups fold to one Part, empty
- * utility tracks drop out, everything else stays (the human can delete rows
- * the detector got wrong — resilient include beats clever exclude, per the
- * 2026-06-12 field finding that real Sets classify unevenly).
+ * A node in the credit tree. A leaf is one performing track; a group folds its
+ * children but is itself a node (creditable as a whole when collapsed, or by
+ * its parts when expanded — the dialog decides). The hierarchy mirrors Live's
+ * group/folder tracks; `children` is present iff `kind === "group"`.
  */
-export interface Part {
+export interface PartNode {
   /** Stable re-run anchor: `${trackIndex}:${trimmedName}`. */
   key: string;
   /** Pre-filled, editable instrument label (the track/group name). */
   instrumentLabel: string;
   trackName: string;
-  deviceNames: string[];
-  sampleFiles: string[]; // basenames, context only
   kind: "instrument" | "audio" | "group";
+  /** Own (leaf) or aggregated descendant (group) device names — context only. */
+  deviceNames: string[];
+  /** Basenames — context only. */
+  sampleFiles: string[];
+  children?: PartNode[];
 }
 
 function basename(path: string): string {
@@ -32,51 +34,69 @@ function kindOf(t: TrackSnapshot): "instrument" | "audio" {
   return t.type === "midi" ? "instrument" : "audio";
 }
 
-export function deriveParts(snapshot: SongSnapshot): Part[] {
+/**
+ * Build the credit tree from a snapshot. The snapshot is flat with each track
+ * carrying `groupIndex` (its immediate parent's index, or null). A track that
+ * is some other track's parent becomes a group node; everything else is a leaf.
+ * Inclusion: a leaf is kept iff it performs (has devices or clips); a group is
+ * kept iff it has at least one kept descendant. Empty/utility tracks and groups
+ * drop out.
+ */
+export function derivePartTree(snapshot: SongSnapshot): PartNode[] {
   const tracks = snapshot.tracks;
-  const groupParents = new Set<number>();
-  for (const t of tracks) {
-    if (t.groupIndex != null) groupParents.add(t.groupIndex);
-  }
-
-  const parts: Part[] = [];
+  const childrenByParent = new Map<number, number[]>();
   tracks.forEach((t, i) => {
-    const name = (t.name ?? "").trim() || "Untitled track";
+    if (t.groupIndex != null) {
+      const arr = childrenByParent.get(t.groupIndex) ?? [];
+      arr.push(i);
+      childrenByParent.set(t.groupIndex, arr);
+    }
+  });
 
-    if (groupParents.has(i)) {
-      // Group parent: one Part folding its children. Include only when the
-      // group carries any performance at all.
-      const children = tracks.filter((c) => c.groupIndex === i);
-      const members = [t, ...children];
-      if (!members.some(performs)) return;
-      const deviceNames = Array.from(
-        new Set(members.flatMap((m) => m.deviceNames)),
-      );
-      const sampleFiles = Array.from(
-        new Set(members.flatMap((m) => m.sampleFilePaths.map(basename))),
-      );
-      parts.push({
+  function buildNode(i: number): PartNode | null {
+    const t = tracks[i]!;
+    const name = (t.name ?? "").trim() || "Untitled track";
+    const childIdx = childrenByParent.get(i);
+
+    if (childIdx) {
+      const children = childIdx
+        .map(buildNode)
+        .filter((n): n is PartNode => n !== null);
+      if (children.length === 0) return null; // no performing descendant
+      return {
         key: `${i}:${name}`,
         instrumentLabel: name,
         trackName: name,
-        deviceNames,
-        sampleFiles,
         kind: "group",
-      });
-      return;
+        deviceNames: Array.from(
+          new Set([...t.deviceNames, ...children.flatMap((c) => c.deviceNames)]),
+        ),
+        sampleFiles: Array.from(
+          new Set([
+            ...t.sampleFilePaths.map(basename),
+            ...children.flatMap((c) => c.sampleFiles),
+          ]),
+        ),
+        children,
+      };
     }
 
-    if (t.groupIndex != null) return; // folded into its parent
-    if (!performs(t)) return; // empty utility track
-
-    parts.push({
+    if (!performs(t)) return null; // empty utility leaf
+    return {
       key: `${i}:${name}`,
       instrumentLabel: name,
       trackName: name,
+      kind: kindOf(t),
       deviceNames: t.deviceNames,
       sampleFiles: t.sampleFilePaths.map(basename),
-      kind: kindOf(t),
-    });
+    };
+  }
+
+  const roots: PartNode[] = [];
+  tracks.forEach((t, i) => {
+    if (t.groupIndex != null) return; // children are built by their parent
+    const node = buildNode(i);
+    if (node) roots.push(node);
   });
-  return parts;
+  return roots;
 }
