@@ -75,6 +75,18 @@ describe("successBody", () => {
     expect(html).toContain("master ownership");
     expect(html).toContain("already set");
   });
+
+  it("logs a splice-samples line when any were captured", () => {
+    const html = successBody(12, "created", 3);
+    expect(html).toContain("splice samples");
+    expect(html).toContain("3");
+    expect(html).toContain("no clearance needed");
+  });
+
+  it("omits the splice line when zero or undefined", () => {
+    expect(successBody(12, "created", 0)).not.toContain("splice samples");
+    expect(successBody(12, "created")).not.toContain("splice samples");
+  });
 });
 
 describe("pasteKeyHtml", () => {
