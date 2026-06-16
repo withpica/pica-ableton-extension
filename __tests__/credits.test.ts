@@ -272,6 +272,57 @@ describe("saveCredits", () => {
   });
 });
 
+describe("saveCredits person_id linking", () => {
+  function fakeClient(calls: Array<Record<string, unknown>>) {
+    return {
+      callTool: async (_name: string, args: Record<string, unknown>) => {
+        calls.push(args);
+        return { person_id: args.person_id ?? null };
+      },
+    } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
+  }
+  const cands = [
+    { id: "p1", name: "Elle Limebear", stageNames: ["Elle"] },
+    { id: "p2", name: "Sam", stageNames: [] },
+    { id: "p3", name: "Sam", stageNames: [] },
+  ];
+
+  it("sends person_id when the typed name uniquely matches an existing person", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const out = await saveCredits(
+      fakeClient(calls),
+      "rec1",
+      [{ instrument: "guitar", performerName: "Elle" }],
+      [],
+      cands,
+    );
+    expect(calls[0]!.person_id).toBe("p1");
+    expect(out[0]!.status).toBe("saved_linked");
+  });
+
+  it("omits person_id for a new name (free text) and for ambiguous matches", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    await saveCredits(
+      fakeClient(calls),
+      "rec1",
+      [
+        { instrument: "keys", performerName: "Brand New Person" },
+        { instrument: "bass", performerName: "Sam" },
+      ],
+      [],
+      cands,
+    );
+    expect(calls[0]!.person_id).toBeUndefined();
+    expect(calls[1]!.person_id).toBeUndefined();
+  });
+
+  it("works with no candidates (back-compat default)", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    await saveCredits(fakeClient(calls), "rec1", [{ instrument: "x", performerName: "Y" }], []);
+    expect(calls[0]!.person_id).toBeUndefined();
+  });
+});
+
 describe("summarizeCredits", () => {
   const oc = (status: CreditOutcome["status"]): CreditOutcome => ({
     creditedName: "x",

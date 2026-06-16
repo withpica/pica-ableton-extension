@@ -2,6 +2,7 @@
 
 import { PicaMcpError, type PicaMcpClient } from "./mcpClient";
 import type { PartNode } from "../session/parts";
+import { resolvePersonId, type PersonCandidate } from "./people";
 
 export interface CreditRow {
   instrument: string;
@@ -196,6 +197,7 @@ export async function saveCredits(
   recordingId: string,
   rows: CreditRow[],
   existing: ExistingCredit[],
+  candidates: PersonCandidate[] = [],
 ): Promise<CreditOutcome[]> {
   const merged = mergeRowsByPerson(rows);
   const existingKey = new Set(
@@ -213,6 +215,7 @@ export async function saveCredits(
       continue;
     }
     try {
+      const personId = resolvePersonId(m.performerName, candidates);
       const created = await client.callTool<{ person_id?: string | null }>(
         "pica_recording_credits_update",
         {
@@ -220,6 +223,7 @@ export async function saveCredits(
           credited_name: m.performerName,
           role: ROLE,
           instrument: m.instrument,
+          ...(personId ? { person_id: personId } : {}),
         },
       );
       outcomes.push({
