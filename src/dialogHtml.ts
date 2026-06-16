@@ -80,6 +80,29 @@ export function pasteKeyHtml(): string {
   );
 }
 
+/** Duplicate-title choice dialog: add to existing, register a new version
+ *  (with a type picker), or cancel. Bridges {action, versionType?}. */
+export function duplicateChoiceHtml(title: string, versionTypes: readonly string[]): string {
+  const existingJs = bridgeSend("JSON.stringify({action:'existing'})");
+  const newVersionJs = bridgeSend(
+    "JSON.stringify({action:'newVersion',versionType:document.getElementById('vt').value})",
+  );
+  const cancelJs = bridgeSend("JSON.stringify({action:'cancel'})");
+  const options = versionTypes
+    .map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`)
+    .join("");
+  return (
+    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<div style="color:#B87333;margin-bottom:8px">pica — already registered</div>` +
+    `a work titled "${escapeHtml(title)}" already exists in your catalog.` +
+    `<div style="margin-top:14px"><button onclick="${escapeHtml(existingJs)}">add credits to the existing recording</button></div>` +
+    `<div style="margin-top:14px">register as a new version: ` +
+    `<select id="vt" style="background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:4px">${options}</select> ` +
+    `<button onclick="${escapeHtml(newVersionJs)}">register version</button></div>` +
+    `<div style="margin-top:14px"><button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
+  );
+}
+
 /** Success dialog body: an unambiguous "it's in PICA" + a non-alarming completeness line. */
 export function successBody(
   completenessScore?: number,
