@@ -4,7 +4,7 @@ Register your Ableton Live Set as a **work + master recording** in [PICA](https:
 
 Right-click a track → **Register Set in PICA** → a confirm panel shows the captured session (tracks, devices, samples, tempo, key). You add a title + artist; it creates one `work` and its master `recording` in your catalog and gives you the link. The full session snapshot is stashed on the work for later enrichment. Nothing is written until you confirm.
 
-This covers **Stages 1–2** of ADR-259 ("PICA inside the DAW"): register-from-Set plus the attribution checklist (per-instrument draft credits). Later stages add bounce/stem upload, sample clearance, and deliver-from-DAW.
+This covers **Stages 1–2** of ADR-259 ("PICA inside the DAW") plus the register-flow refinements that followed: register-from-Set, the attribution checklist (per-instrument draft credits, expandable per group), composition writers, automatic Splice-sample attribution, master-ownership capture, and a single consolidated final report at the end. Later stages add bounce/stem upload and deliver-from-DAW.
 
 ## Requirements
 
@@ -72,25 +72,39 @@ Install the packaged extension by dropping `dist/pica.ablx` onto Live's **Extens
 
 ## Use
 
-Right-click a track → **Register Set in PICA**. The confirm panel is editable; a duplicate title offers a choice instead of creating a second work. On success you get the work's completeness score and an `/inspect` link.
+Right-click a track → **Register Set in PICA**. The confirm panel is editable; a duplicate title offers a choice instead of creating a second work.
+
+The flow runs the capture steps quietly and ends in **one consolidated final
+report** — what was captured (master ownership, credits, writers, Splice
+samples, each reported honestly including skips/failures) plus three links to
+view it: the **work**, the **recording** (where credits and samples render),
+and your **catalog**. The old per-step success popups are gone.
 
 **Registering a new version.** If a Set's title already matches a work in your
 catalog, you can either add credits to the existing recording or **register the
 Set as a new version** (a new recording under the same work) — pick the version
-type (alternate, remix, acoustic, live, cover, alternate master, demo).
+type (alternate, remix, acoustic, live, cover, alternate master, demo). Any
+recording the extension *mints* (a fresh master, or a new version) is claimed
+as 100% org master ownership by default — a starting position you refine or
+reassign in `/inspect`; adding credits to a pre-existing recording claims nothing.
 
-After a successful register (or when re-running on an already-registered Set), a
-credits checklist opens: one row per performed part with the instrument
-pre-filled from the track/group name. Type who played each part and save —
-credits land on the master recording as `Performer` rows (one per person,
-instruments combined), auto-linked to existing people in your org by exact
-name match, kept as free-text drafts otherwise. Skipping writes nothing.
-Re-running shows what's already saved and never duplicates.
+**Credits checklist.** After register (or when re-running on an already-registered
+Set) a checklist opens: one row per performed part, instrument pre-filled from the
+track/group name. Tracks inside a Live group can be credited individually
+(expand the group) or as the whole group collapsed — never both. Credits land on
+the master recording as `Performer` rows (one per person, instruments combined),
+auto-linked to existing people by exact name, kept as free-text drafts otherwise.
+
+**Writers + Splice.** A writers step captures composition writers for the work,
+and any Splice samples used in the Set are auto-attributed to the recording
+(royalty-free, no clearance needed). Every step is skippable and best-effort —
+skipping or a failure is reported in the final report, never blocks it, and
+re-running never duplicates.
 
 ## How it works
 
 - Reads the **whole Set** via `context.application.song` — independent of which track you right-clicked (the SDK has no global/Set menu scope, so the action is offered on tracks).
-- Writes over PICA's **MCP JSON-RPC endpoint** (`/api/mcp`): declares identity (`pica_introduce_self`), then `pica_works_create` (with the session snapshot in `metadata`) and `pica_recordings_create`. This instrumented path makes the new work appear **live in PICA's `/inspect` activity rail**.
+- Writes over PICA's **MCP JSON-RPC endpoint** (`/api/mcp`): declares identity (`pica_introduce_self`), then `pica_works_create` (with the session snapshot in `metadata`) and `pica_recordings_create`, followed by the capture steps — `pica_recording_splits_create` (master ownership), `pica_recording_credits_*` (performer credits), `pica_work_writers_add`, and `pica_recording_samples_add` (Splice). This instrumented path makes the new work appear **live in PICA's `/inspect` activity rail**.
 - **Architecture:** a pure, host-independent core (`src/pica/*`, `src/session/snapshot.ts`) unit-tested with Vitest, plus thin Ableton host glue (`src/extension.ts`, `ui/interface.html`). Run `npm test` to exercise the core without Live.
 
 ## License / IP
