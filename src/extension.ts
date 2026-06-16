@@ -38,7 +38,7 @@ import {
   type StepResult,
 } from "./dialogHtml";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
-import type { MasterOwnershipOutcome } from "./pica/ownership";
+import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./pica/ownership";
 
 const BASE_URL = "https://withpica.com";
 const PANEL_W = 380;
@@ -164,6 +164,20 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
         return outcome?.added ?? 0;
       };
 
+      // Capture 100% org master ownership on a recording WE mint on the duplicate
+      // path (new version, or completing the existing work's master) — same as the
+      // fresh-register path. Idempotent (skips if a master split exists) and a
+      // starting position the owner refines/reassigns in /inspect. Best-effort: a
+      // non-401 failure is reported, never thrown (401 is handled inside
+      // runWithClient). NOT called when adding to a pre-existing recording (not
+      // necessarily ours to claim).
+      const captureOwnership = async (
+        recId: string,
+      ): Promise<MasterOwnershipOutcome["status"]> =>
+        runWithClient((c) => ensureMasterOwnership(c, recId))
+          .then((o) => o.status)
+          .catch(() => "failed" as const);
+
       if (choice.action === "newVersion") {
         const versionType = coerceVersionType(choice.versionType);
         const { recordingId } = await runWithClient((c) =>
@@ -174,6 +188,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
             versionType,
           }),
         );
+        const masterOwnership = await captureOwnership(recordingId);
         const spliceLogged = await captureSplice(recordingId);
         const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, []), []);
         await showReport(context, {
@@ -181,6 +196,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           title: answer.title!,
           workId: e.existingWorkId,
           recordingId,
+          masterOwnership,
           spliceLogged,
           credits,
         });
@@ -191,6 +207,9 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
         const found = await findExistingRegistration(client, answer.title!);
         let recordingId = found?.recordingId ?? null;
         let existing: ExistingCredit[] = [];
+        // Only claim master ownership when WE mint the recording below; adding
+        // credits to a pre-existing recording must not assert ownership over it.
+        let masterOwnership: MasterOwnershipOutcome["status"] | undefined;
         if (recordingId) {
           existing = await loadExistingCredits(client, recordingId);
         } else {
@@ -206,6 +225,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
             }),
           );
           recordingId = created.recordingId;
+          masterOwnership = await captureOwnership(recordingId);
         }
         const spliceLogged = await captureSplice(recordingId);
         const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, existing), existing);
@@ -214,6 +234,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           title: answer.title!,
           workId: e.existingWorkId,
           recordingId,
+          masterOwnership,
           spliceLogged,
           credits,
         });
