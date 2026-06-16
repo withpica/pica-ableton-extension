@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escapeHtml, messageHtml, linkMessageHtml, successBody, pasteKeyHtml, duplicateChoiceHtml } from "../src/dialogHtml";
+import { escapeHtml, messageHtml, linkMessageHtml, finalReportHtml, type RegisterReport, pasteKeyHtml, duplicateChoiceHtml } from "../src/dialogHtml";
 
 describe("escapeHtml", () => {
   it("escapes &, <, > and quotes", () => {
@@ -37,55 +37,62 @@ describe("linkMessageHtml", () => {
   });
 });
 
-describe("successBody", () => {
-  // 2026-06-12 smoke-test feedback: "Registered · 0% complete" read as if the
-  // upload itself failed. The body must say the work IS in the catalog and
-  // frame the score as expected-to-be-low.
-  it("states the work is in the catalog and frames a 0% score as normal", () => {
-    const body = successBody(0);
-    expect(body).toContain("now in your catalog");
-    expect(body).toContain("completeness 0%");
-    expect(body).toContain("normal for a fresh registration");
+describe("finalReportHtml", () => {
+  const base: RegisterReport = {
+    action: "registered",
+    title: "My Song",
+    workId: "w1",
+    recordingId: "r1",
+  };
+
+  it("renders the registered lead line and all three links", () => {
+    const html = finalReportHtml(base);
+    expect(html).toContain("are now in your catalog");
+    expect(html).toContain("My Song");
+    expect(html).toContain("https://withpica.com/inspect/works/w1");
+    expect(html).toContain("https://withpica.com/inspect/recordings/r1");
+    expect(html).toContain("https://withpica.com/inspect");
+    expect(html).toContain("view the work");
+    expect(html).toContain("view the recording");
+    expect(html).toContain("open your catalog");
   });
 
-  it("omits the completeness line when no score is available", () => {
-    const body = successBody(undefined);
-    expect(body).toContain("now in your catalog");
-    expect(body).not.toContain("completeness");
+  it("varies the lead line by action", () => {
+    expect(finalReportHtml({ ...base, action: "version" })).toContain("as a new version");
+    expect(finalReportHtml({ ...base, action: "existing" })).toContain("updated &quot;My Song&quot;");
   });
 
-  it("successBody shows the master-ownership line when created", () => {
-    const html = successBody(12, "created");
-    expect(html).toContain("master ownership");
-    expect(html).toContain("100%");
+  it("escapes the title", () => {
+    const html = finalReportHtml({ ...base, title: "<b>x</b>" });
+    expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
+    expect(html).not.toContain("<b>x</b>");
   });
 
-  it("successBody shows nothing about ownership when status is undefined", () => {
-    expect(successBody(12)).not.toContain("master ownership");
+  it("renders ownership lines and omits when undefined", () => {
+    expect(finalReportHtml({ ...base, masterOwnership: "created" })).toContain("your org now owns 100%");
+    expect(finalReportHtml({ ...base, masterOwnership: "skipped_existing" })).toContain("master ownership: already set");
+    expect(finalReportHtml({ ...base, masterOwnership: "failed" })).toContain("could not be saved automatically");
+    expect(finalReportHtml(base)).not.toContain("master ownership");
   });
 
-  it("successBody notes a failed ownership write so it is not silent", () => {
-    const html = successBody(undefined, "failed");
-    expect(html).toContain("master ownership");
-    expect(html).toContain("could not be saved");
+  it("distinguishes credits skipped / error / saved, and omits when undefined", () => {
+    expect(finalReportHtml({ ...base, credits: { state: "skipped" } })).toContain("credits: skipped.");
+    expect(finalReportHtml({ ...base, credits: { state: "error", error: "boom" } })).toContain("credits: could not be saved.");
+    expect(finalReportHtml({ ...base, credits: { state: "saved", outcomes: [{ creditedName: "a", instrument: "b", status: "saved_linked" }] } })).toContain("credits: 1 saved.");
+    expect(finalReportHtml(base)).not.toContain("credits:");
   });
 
-  it("successBody shows 'already set' for skipped_existing ownership", () => {
-    const html = successBody(12, "skipped_existing");
-    expect(html).toContain("master ownership");
-    expect(html).toContain("already set");
+  it("distinguishes writers skipped / error / saved-empty, and omits when undefined", () => {
+    expect(finalReportHtml({ ...base, writers: { state: "skipped" } })).toContain("writers: skipped.");
+    expect(finalReportHtml({ ...base, writers: { state: "error", error: "x" } })).toContain("writers: could not be saved.");
+    expect(finalReportHtml({ ...base, writers: { state: "saved", outcomes: [] } })).toContain("writers: none added.");
+    expect(finalReportHtml(base)).not.toContain("writers:");
   });
 
-  it("logs a splice-samples line when any were captured", () => {
-    const html = successBody(12, "created", 3);
-    expect(html).toContain("splice samples");
-    expect(html).toContain("3");
-    expect(html).toContain("no clearance needed");
-  });
-
-  it("omits the splice line when zero or undefined", () => {
-    expect(successBody(12, "created", 0)).not.toContain("splice samples");
-    expect(successBody(12, "created")).not.toContain("splice samples");
+  it("shows the splice line only when > 0", () => {
+    expect(finalReportHtml({ ...base, spliceLogged: 3 })).toContain("splice samples: 3 logged");
+    expect(finalReportHtml({ ...base, spliceLogged: 0 })).not.toContain("splice samples");
+    expect(finalReportHtml(base)).not.toContain("splice samples");
   });
 });
 
