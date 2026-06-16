@@ -6,6 +6,7 @@ import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./ownership"
 export interface RegisterInput {
   title: string;
   artistName: string;
+  primaryArtistId?: string;
   workType: string; // song | instrumental | library | demo | sample
   key: string;
   metadata: Record<string, unknown>;
@@ -64,13 +65,14 @@ export function coerceVersionType(value: unknown): string {
  *  Shared by registerSet (master) and the new-version / recovery paths. */
 export async function createRecordingForWork(
   client: PicaMcpClient,
-  input: { workId: string; title: string; artistName: string; versionType: string },
+  input: { workId: string; title: string; artistName: string; versionType: string; primaryArtistId?: string },
 ): Promise<{ recordingId: string }> {
   const rec = await client.callTool<{ id: string }>("pica_recordings_create", {
     title: input.title,
     artist_name: input.artistName,
     version_type: input.versionType,
     work_id: input.workId,
+    ...(input.primaryArtistId ? { primary_artist_id: input.primaryArtistId } : {}),
   });
   if (!rec?.id) {
     throw new Error("PICA created the recording but did not return an id.");
@@ -134,6 +136,7 @@ export async function registerSet(client: PicaMcpClient, input: RegisterInput): 
     title: input.title,
     artistName: input.artistName,
     versionType: "master",
+    primaryArtistId: input.primaryArtistId,
   });
 
   // Never proceed without an id: an undefined recording_id would silently corrupt

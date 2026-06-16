@@ -217,3 +217,51 @@ describe("createRecordingForWork", () => {
     ).rejects.toThrow(/did not return an id/);
   });
 });
+
+describe("primary_artist_id linking", () => {
+  it("createRecordingForWork sends primary_artist_id when provided", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const client = {
+      callTool: async (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        return { id: "rec1" };
+      },
+    } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
+    await createRecordingForWork(client, {
+      workId: "w1", title: "T", artistName: "Elle", versionType: "master", primaryArtistId: "p1",
+    });
+    expect(calls[0]!.args.primary_artist_id).toBe("p1");
+  });
+
+  it("createRecordingForWork omits primary_artist_id when not provided", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const client = {
+      callTool: async (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        return { id: "rec1" };
+      },
+    } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
+    await createRecordingForWork(client, {
+      workId: "w1", title: "T", artistName: "Elle", versionType: "master",
+    });
+    expect(calls[0]!.args.primary_artist_id).toBeUndefined();
+  });
+
+  it("registerSet threads primaryArtistId into the master recording create", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const client = {
+      callTool: async (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        if (name === "pica_works_query") return [];
+        if (name === "pica_works_create") return { id: "w1" };
+        if (name === "pica_recordings_create") return { id: "r1" };
+        if (name === "pica_recording_splits_list") return [];
+        if (name === "pica_recording_splits_create") return { id: "s1" };
+        return {};
+      },
+    } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
+    await registerSet(client, { ...input, primaryArtistId: "p9" });
+    const recCreate = calls.find((c) => c.name === "pica_recordings_create");
+    expect(recCreate!.args.primary_artist_id).toBe("p9");
+  });
+});
