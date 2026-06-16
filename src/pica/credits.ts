@@ -1,7 +1,7 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
 import { PicaMcpError, type PicaMcpClient } from "./mcpClient";
-import type { Part } from "../session/parts";
+import type { PartNode } from "../session/parts";
 
 export interface CreditRow {
   instrument: string;
@@ -55,40 +55,100 @@ export function mergeRowsByPerson(
   }));
 }
 
+/** A prefilled credit node handed to the dialog (mirrors PartNode + UI state). */
+export interface PrefillNode {
+  key: string;
+  instrument: string; // editable label
+  performerName: string; // "" = unfilled
+  kind: "instrument" | "audio" | "group";
+  expanded: boolean; // groups only; leaves always false
+  children?: PrefillNode[];
+}
+
+/** The tree-state the dialog posts back on save — PrefillNode without keys (none are needed on the return trip). */
+export type FrontierNode = Omit<PrefillNode, "key" | "children"> & {
+  children?: FrontierNode[];
+};
+
 /**
- * Prefill for the panel: one row per detected Part; an existing credit whose
- * instrument list mentions the part's label fills that row's name. Existing
- * credits matching no part are appended so the human always sees everything
- * already saved (editing, not appending — saving skips unchanged rows).
+ * Prefill for the dialog: one node per detected PartNode, performer names filled
+ * from existing credits matched by instrument label. A group is initialised
+ * EXPANDED when any descendant matched a saved credit (so prior per-track work
+ * shows); otherwise it stays collapsed and is itself matched against the group
+ * label. Existing credits matching no node are appended as standalone leaf nodes
+ * so the human always sees everything already saved.
  */
-export function buildPrefillRows(
-  parts: Part[],
+export function buildPrefillTree(
+  tree: PartNode[],
   existing: ExistingCredit[],
-): CreditRow[] {
+): PrefillNode[] {
   const claimed = new Set<ExistingCredit>();
-  const rows: CreditRow[] = parts.map((p) => {
-    const match = existing.find(
-      (e) =>
-        !claimed.has(e) &&
-        (e.instrument ?? "")
-          .split(",")
-          .map(norm)
-          .includes(norm(p.instrumentLabel)),
+  const matchLabel = (label: string): string => {
+    const e = existing.find(
+      (c) =>
+        !claimed.has(c) &&
+        (c.instrument ?? "").split(",").map(norm).includes(norm(label)),
     );
-    if (match) claimed.add(match);
+    if (e) {
+      claimed.add(e);
+      return e.credited_name;
+    }
+    return "";
+  };
+  const hasName = (n: PrefillNode): boolean =>
+    n.performerName !== "" || (n.children?.some(hasName) ?? false);
+
+  const buildNode = (n: PartNode): PrefillNode => {
+    if (n.kind === "group") {
+      const children = (n.children ?? []).map(buildNode);
+      const expanded = children.some(hasName);
+      return {
+        key: n.key,
+        instrument: n.instrumentLabel,
+        performerName: expanded ? "" : matchLabel(n.instrumentLabel),
+        kind: "group",
+        expanded,
+        children,
+      };
+    }
     return {
-      instrument: p.instrumentLabel,
-      performerName: match?.credited_name ?? "",
+      key: n.key,
+      instrument: n.instrumentLabel,
+      performerName: matchLabel(n.instrumentLabel),
+      kind: n.kind,
+      expanded: false,
     };
-  });
-  for (const e of existing) {
-    if (claimed.has(e)) continue;
-    rows.push({
+  };
+
+  const nodes = tree.map(buildNode);
+  const extras: PrefillNode[] = existing
+    .filter((e) => !claimed.has(e))
+    .map((e) => ({
+      key: `extra:${e.id}`,
       instrument: (e.instrument ?? "").trim(),
       performerName: e.credited_name,
-    });
+      kind: "audio" as const,
+      expanded: false,
+    }));
+  return [...nodes, ...extras];
+}
+
+/**
+ * Collapse the dialog's tree-state to the flat credit rows to save: an expanded
+ * group contributes its children (not itself); a collapsed group and every leaf
+ * contribute themselves. A parent and its child can never both appear, so there
+ * is no double-crediting. Blank names are filtered later by mergeRowsByPerson.
+ */
+export function serializeFrontier(nodes: FrontierNode[]): CreditRow[] {
+  const out: CreditRow[] = [];
+  for (const n of nodes) {
+    if (n.kind === "group" && n.expanded) {
+      out.push(...serializeFrontier(n.children ?? []));
+    } else {
+      out.push({ instrument: n.instrument, performerName: n.performerName });
+    }
   }
-  return rows;
+  return out;
 }
 
 /** Read the recording's saved credits (re-run path). */
