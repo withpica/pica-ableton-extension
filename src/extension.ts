@@ -29,6 +29,7 @@ import {
   type PrefillNode,
 } from "./pica/credits";
 import { saveWriters, summarizeWriters, type WriterOutcome } from "./pica/writers";
+import { detectSpliceSamples, saveSpliceSamples } from "./pica/samples";
 import { messageHtml, linkMessageHtml, successBody, duplicateChoiceHtml } from "./dialogHtml";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
 import type { MasterOwnershipOutcome } from "./pica/ownership";
@@ -146,6 +147,15 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
       const choice = safeParse(raw); // {} on close → treated as cancel
       const tree = derivePartTree(snapshot);
 
+      // RT-2: best-effort Splice capture whenever the Set is attributed to a
+      // recording on the duplicate path (new version OR completing the existing
+      // master). Idempotent; no count is surfaced here.
+      const captureSplice = async (recId: string) => {
+        const samples = detectSpliceSamples(snapshot);
+        if (!samples.length) return;
+        await runWithClient((c) => saveSpliceSamples(c, recId, samples)).catch(() => undefined);
+      };
+
       if (choice.action === "newVersion") {
         const versionType = coerceVersionType(choice.versionType);
         const { recordingId } = await runWithClient((c) =>
@@ -156,6 +166,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
             versionType,
           }),
         );
+        await captureSplice(recordingId);
         await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, []), []);
         return undefined;
       }
@@ -180,6 +191,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           );
           recordingId = created.recordingId;
         }
+        await captureSplice(recordingId);
         await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, existing), existing);
         return undefined;
       }
@@ -198,7 +210,24 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     inspectUrl: string;
     masterOwnership?: MasterOwnershipOutcome["status"];
   };
-  await showLink(context, "pica — registered", successBody(r.completenessScore, r.masterOwnership), r.inspectUrl);
+  // RT-2: auto-capture Splice samples used in the Set, before the success
+  // dialog so its count can be surfaced. Best-effort + idempotent; a 401 reaches
+  // the reconnect runner via runWithClient.
+  let spliceLogged = 0;
+  const detectedSplice = detectSpliceSamples(snapshot);
+  if (detectedSplice.length) {
+    const spliceOutcome = await runWithClient((c) =>
+      saveSpliceSamples(c, r.recordingId, detectedSplice),
+    ).catch(() => undefined);
+    spliceLogged = spliceOutcome?.added ?? 0;
+  }
+
+  await showLink(
+    context,
+    "pica — registered",
+    successBody(r.completenessScore, r.masterOwnership, spliceLogged),
+    r.inspectUrl,
+  );
 
   // Stage 2: offer the attribution checklist right after register (skippable).
   // Best-effort: the registration already succeeded — a checklist failure must

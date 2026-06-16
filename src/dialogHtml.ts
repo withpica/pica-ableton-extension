@@ -107,6 +107,7 @@ export function duplicateChoiceHtml(title: string, versionTypes: readonly string
 export function successBody(
   completenessScore?: number,
   masterOwnership?: MasterOwnershipOutcome["status"],
+  spliceSamples?: number,
 ): string {
   const lines = ["the work and its master recording are now in your catalog."];
   if (typeof completenessScore === "number") {
@@ -123,6 +124,11 @@ export function successBody(
   } else if (masterOwnership === "failed") {
     lines.push(
       "master ownership: could not be saved automatically. set it in PICA.",
+    );
+  }
+  if (typeof spliceSamples === "number" && spliceSamples > 0) {
+    lines.push(
+      `splice samples: ${spliceSamples} logged (royalty-free — no clearance needed).`,
     );
   }
   return lines.join("\n");
