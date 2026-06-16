@@ -72,7 +72,12 @@ Install the packaged extension by dropping `dist/pica.ablx` onto Live's **Extens
 
 ## Use
 
-Right-click a track → **Register Set in PICA**. The confirm panel is editable; a duplicate title offers to open the existing work instead of creating a second. On success you get the work's completeness score and an `/inspect` link.
+Right-click a track → **Register Set in PICA**. The confirm panel is editable; a duplicate title offers a choice instead of creating a second work. On success you get the work's completeness score and an `/inspect` link.
+
+**Registering a new version.** If a Set's title already matches a work in your
+catalog, you can either add credits to the existing recording or **register the
+Set as a new version** (a new recording under the same work) — pick the version
+type (alternate, remix, acoustic, live, cover, alternate master, demo).
 
 After a successful register (or when re-running on an already-registered Set), a
 credits checklist opens: one row per performed part with the instrument
