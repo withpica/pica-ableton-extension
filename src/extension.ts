@@ -26,6 +26,7 @@ import {
   type PrefillNode,
 } from "./pica/credits";
 import { saveWriters, summarizeWriters, type WriterOutcome } from "./pica/writers";
+import { detectSpliceSamples, saveSpliceSamples } from "./pica/samples";
 import { messageHtml, linkMessageHtml, successBody } from "./dialogHtml";
 import { connectAndStoreKey, withReconnect } from "./pica/connect";
 import type { MasterOwnershipOutcome } from "./pica/ownership";
@@ -139,6 +140,15 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
       try {
         const found = await findExistingRegistration(client, answer.title!);
         if (found?.recordingId) {
+          // RT-2: best-effort Splice capture on re-run too (idempotent; no
+          // success dialog here to surface a count).
+          const reRunRecId = found.recordingId;
+          const reRunSplice = detectSpliceSamples(snapshot);
+          if (reRunSplice.length) {
+            await runWithClient((c) =>
+              saveSpliceSamples(c, reRunRecId, reRunSplice),
+            ).catch(() => undefined);
+          }
           const existing = await loadExistingCredits(client, found.recordingId);
           const tree = derivePartTree(snapshot);
           await runCreditsFlow(
@@ -173,7 +183,24 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     inspectUrl: string;
     masterOwnership?: MasterOwnershipOutcome["status"];
   };
-  await showLink(context, "pica — registered", successBody(r.completenessScore, r.masterOwnership), r.inspectUrl);
+  // RT-2: auto-capture Splice samples used in the Set, before the success
+  // dialog so its count can be surfaced. Best-effort + idempotent; a 401 reaches
+  // the reconnect runner via runWithClient.
+  let spliceLogged = 0;
+  const detectedSplice = detectSpliceSamples(snapshot);
+  if (detectedSplice.length) {
+    const spliceOutcome = await runWithClient((c) =>
+      saveSpliceSamples(c, r.recordingId, detectedSplice),
+    ).catch(() => undefined);
+    spliceLogged = spliceOutcome?.added ?? 0;
+  }
+
+  await showLink(
+    context,
+    "pica — registered",
+    successBody(r.completenessScore, r.masterOwnership, spliceLogged),
+    r.inspectUrl,
+  );
 
   // Stage 2: offer the attribution checklist right after register (skippable).
   // Best-effort: the registration already succeeded — a checklist failure must
