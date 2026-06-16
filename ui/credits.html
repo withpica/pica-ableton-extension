@@ -17,6 +17,8 @@
       .credit-row .who { flex:1.2; }
       .credit-row .remove { background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:14px; padding:0 2px; }
       .add { background:transparent; border:1px dashed var(--line); color:var(--muted); width:100%; padding:7px; cursor:pointer; font-size:12px; margin-top:2px; }
+      .caret { background:transparent; border:none; color:var(--muted); cursor:pointer; width:16px; padding:0; font-size:11px; }
+      .caret.leaf { visibility:hidden; }
       .actions { display:flex; gap:8px; margin-top:16px; }
       .actions button { flex:1; padding:9px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; font-size:12px; letter-spacing:.04em; }
       .actions button.primary { border-color:var(--copper); color:var(--copper); }
@@ -33,39 +35,105 @@
     </div>
 
     <script>
-      // Injected by extension.ts. Shape: { rows: [{ instrument, performerName }] }.
+      // Injected by extension.ts. Shape: { tree: [PrefillNode] }, where a node is
+      // { key, instrument, performerName, kind, expanded, children? }.
       var prefill = window.__PICA_PREFILL__ || {};
       if (!window.__PICA_PREFILL__) {
         try { prefill = JSON.parse(decodeURIComponent(location.hash.slice(1) || "")) || {}; } catch (e) {}
       }
       var rowsEl = document.getElementById("rows");
 
-      function addRow(instrument, performerName) {
-        var div = document.createElement("div");
-        div.className = "credit-row";
-        var inst = document.createElement("input");
-        inst.className = "instrument";
-        inst.placeholder = "instrument";
-        inst.value = instrument || "";
-        var who = document.createElement("input");
-        who.className = "who";
-        who.placeholder = "who played this?";
-        who.value = performerName || "";
+      function makeInput(cls, ph, val) {
+        var el = document.createElement("input");
+        el.className = cls;
+        el.placeholder = ph;
+        el.value = val || "";
+        return el;
+      }
+
+      // Render one node (and, for a group, its children) into `container`.
+      function renderNode(node, container, depth) {
+        var isGroup = node.kind === "group";
+        var wrap = document.createElement("div");
+        wrap.className = "node";
+        wrap.dataset.kind = node.kind;
+
+        var row = document.createElement("div");
+        row.className = "credit-row";
+        row.style.paddingLeft = depth * 16 + "px";
+
+        var caret = document.createElement("button");
+        caret.type = "button";
+        caret.className = isGroup ? "caret" : "caret leaf";
+
+        var inst = makeInput("instrument", "instrument", node.instrument);
+        var who = makeInput("who", "who played this?", node.performerName);
+
         var rm = document.createElement("button");
         rm.className = "remove";
         rm.textContent = "×";
-        rm.title = "remove row";
-        rm.addEventListener("click", function () { div.remove(); });
-        div.appendChild(inst);
-        div.appendChild(who);
-        div.appendChild(rm);
-        rowsEl.appendChild(div);
+        rm.title = "remove";
+        rm.addEventListener("click", function () { wrap.remove(); });
+
+        row.appendChild(caret);
+        row.appendChild(inst);
+        row.appendChild(who);
+        row.appendChild(rm);
+        wrap.appendChild(row);
+
+        if (isGroup) {
+          var kids = document.createElement("div");
+          kids.className = "children";
+          (node.children || []).forEach(function (c) { renderNode(c, kids, depth + 1); });
+          wrap.appendChild(kids);
+
+          var expanded = !!node.expanded;
+          var apply = function () {
+            caret.textContent = expanded ? "▾" : "▸";
+            kids.style.display = expanded ? "" : "none";
+            who.style.display = expanded ? "none" : ""; // collapsed = credit the whole group
+            wrap.dataset.expanded = expanded ? "1" : "0";
+          };
+          apply();
+          caret.addEventListener("click", function () { expanded = !expanded; apply(); });
+        }
+
+        container.appendChild(wrap);
       }
 
-      (prefill.rows || []).forEach(function (r) { addRow(r.instrument, r.performerName); });
-      if (!(prefill.rows || []).length) addRow("", "");
+      (prefill.tree || []).forEach(function (n) { renderNode(n, rowsEl, 0); });
+      if (!(prefill.tree || []).length) {
+        renderNode({ kind: "audio", instrument: "", performerName: "", expanded: false }, rowsEl, 0);
+      }
 
-      document.getElementById("add").addEventListener("click", function () { addRow("", ""); });
+      // "+ add a part" adds a free top-level leaf row (escape hatch for a player
+      // not represented by any track).
+      document.getElementById("add").addEventListener("click", function () {
+        renderNode({ kind: "audio", instrument: "", performerName: "", expanded: false }, rowsEl, 0);
+      });
+
+      // Dumb DOM → tree-state collector (no frontier rule here; TS applies it).
+      function collect(container) {
+        var out = [];
+        for (var i = 0; i < container.children.length; i++) {
+          var wrap = container.children[i];
+          if (!wrap.classList || !wrap.classList.contains("node")) continue;
+          var row = wrap.querySelector(":scope > .credit-row");
+          var inst = row.querySelector(".instrument").value.trim();
+          var who = row.querySelector(".who").value.trim();
+          if (wrap.dataset.kind === "group") {
+            var kids = wrap.querySelector(":scope > .children");
+            out.push({
+              instrument: inst, performerName: who, kind: "group",
+              expanded: wrap.dataset.expanded === "1",
+              children: collect(kids),
+            });
+          } else {
+            out.push({ instrument: inst, performerName: who, kind: wrap.dataset.kind });
+          }
+        }
+        return out;
+      }
 
       function post(resultObj) {
         var msg = { method: "close_and_send", params: [JSON.stringify(resultObj)] };
@@ -76,18 +144,9 @@
         }
       }
 
-      document.getElementById("skip").addEventListener("click", function () {
-        post({ cancelled: true });
-      });
+      document.getElementById("skip").addEventListener("click", function () { post({ cancelled: true }); });
       document.getElementById("save").addEventListener("click", function () {
-        var rows = [];
-        rowsEl.querySelectorAll(".credit-row").forEach(function (div) {
-          rows.push({
-            instrument: div.querySelector(".instrument").value.trim(),
-            performerName: div.querySelector(".who").value.trim(),
-          });
-        });
-        post({ cancelled: false, rows: rows });
+        post({ cancelled: false, tree: collect(rowsEl) });
       });
     </script>
   </body>
