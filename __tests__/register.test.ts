@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ensureIntroduced, registerSet, findExistingRegistration, DuplicateWorkError, type RegisterInput } from "../src/pica/register";
+import { ensureIntroduced, registerSet, findExistingRegistration, DuplicateWorkError, createRecordingForWork, NEW_VERSION_TYPES, coerceVersionType, type RegisterInput } from "../src/pica/register";
 import { PicaMcpError } from "../src/pica/mcpClient";
 
 function fakeClient() {
@@ -173,5 +173,47 @@ describe("findExistingRegistration", () => {
       workId: "w1",
       recordingId: "r7",
     });
+  });
+});
+
+describe("NEW_VERSION_TYPES", () => {
+  it("excludes master and the video deliverables", () => {
+    expect(NEW_VERSION_TYPES).not.toContain("master");
+    expect(NEW_VERSION_TYPES).not.toContain("music_video");
+    expect(NEW_VERSION_TYPES).not.toContain("lyric_video");
+    expect(NEW_VERSION_TYPES[0]).toBe("alternate"); // default-first
+  });
+});
+
+describe("coerceVersionType", () => {
+  it("passes through a valid version type", () => {
+    expect(coerceVersionType("remix")).toBe("remix");
+    expect(coerceVersionType("alternate_master")).toBe("alternate_master");
+  });
+  it("defaults unrecognised / missing values to alternate", () => {
+    expect(coerceVersionType("master")).toBe("alternate"); // excluded from NEW_VERSION_TYPES
+    expect(coerceVersionType("nonsense")).toBe("alternate");
+    expect(coerceVersionType(undefined)).toBe("alternate");
+    expect(coerceVersionType(42)).toBe("alternate");
+  });
+});
+
+describe("createRecordingForWork", () => {
+  it("creates a recording under the work with the given version type", async () => {
+    const client = { callTool: vi.fn().mockResolvedValue({ id: "rec-1" }) } as any;
+    const out = await createRecordingForWork(client, {
+      workId: "work-1", title: "Song", artistName: "Féz", versionType: "remix",
+    });
+    expect(out).toEqual({ recordingId: "rec-1" });
+    expect(client.callTool).toHaveBeenCalledWith("pica_recordings_create", {
+      title: "Song", artist_name: "Féz", version_type: "remix", work_id: "work-1",
+    });
+  });
+
+  it("throws if no id is returned (never returns an undefined recording id)", async () => {
+    const client = { callTool: vi.fn().mockResolvedValue({}) } as any;
+    await expect(
+      createRecordingForWork(client, { workId: "w", title: "t", artistName: "a", versionType: "alternate" }),
+    ).rejects.toThrow(/did not return an id/);
   });
 });

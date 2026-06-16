@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escapeHtml, messageHtml, linkMessageHtml, successBody, pasteKeyHtml } from "../src/dialogHtml";
+import { escapeHtml, messageHtml, linkMessageHtml, successBody, pasteKeyHtml, duplicateChoiceHtml } from "../src/dialogHtml";
 
 describe("escapeHtml", () => {
   it("escapes &, <, > and quotes", () => {
@@ -87,5 +87,28 @@ describe("pasteKeyHtml", () => {
 
   it("renders a cancel button that bridges {cancelled:true}", () => {
     expect(pasteKeyHtml()).toContain("cancelled");
+  });
+});
+
+describe("duplicateChoiceHtml", () => {
+  const html = duplicateChoiceHtml("My Song", ["alternate", "remix", "demo"]);
+  it("shows the title and all three actions", () => {
+    expect(html).toContain("My Song");
+    expect(html).toContain("action:'existing'");
+    expect(html).toContain("action:'newVersion'");
+    expect(html).toContain("action:'cancel'");
+  });
+  it("reads the selected version type from the #vt select", () => {
+    expect(html).toContain('id="vt"');
+    expect(html).toContain("document.getElementById('vt').value");
+  });
+  it("renders one option per supplied version type, default first", () => {
+    expect(html).toContain('<option value="alternate">');
+    expect(html).toContain('<option value="remix">');
+    expect(html).toContain('<option value="demo">');
+    expect(html.indexOf('value="alternate"')).toBeLessThan(html.indexOf('value="remix"'));
+  });
+  it("escapes the title", () => {
+    expect(duplicateChoiceHtml('<x>', ["alternate"])).toContain("&lt;x&gt;");
   });
 });
