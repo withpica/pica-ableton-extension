@@ -8,7 +8,7 @@ import { PicaMcpClient } from "./pica/mcpClient";
 import { readApiKey } from "./pica/keyStore";
 import { readSong, type SongLike } from "./session/read";
 import { buildMetadata, buildSummary } from "./session/snapshot";
-import { deriveParts } from "./session/parts";
+import { derivePartTree } from "./session/parts";
 import {
   ensureIntroduced,
   registerSet,
@@ -16,12 +16,14 @@ import {
   DuplicateWorkError,
 } from "./pica/register";
 import {
-  buildPrefillRows,
+  buildPrefillTree,
+  serializeFrontier,
   loadExistingCredits,
   saveCredits,
   type CreditOutcome,
-  type CreditRow,
   type ExistingCredit,
+  type FrontierNode,
+  type PrefillNode,
 } from "./pica/credits";
 import { saveWriters, summarizeWriters, type WriterOutcome } from "./pica/writers";
 import { messageHtml, linkMessageHtml, successBody } from "./dialogHtml";
@@ -138,12 +140,12 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
         const found = await findExistingRegistration(client, answer.title!);
         if (found?.recordingId) {
           const existing = await loadExistingCredits(client, found.recordingId);
-          const parts = deriveParts(snapshot);
+          const tree = derivePartTree(snapshot);
           await runCreditsFlow(
             context,
             runWithClient,
             found.recordingId,
-            buildPrefillRows(parts, existing),
+            buildPrefillTree(tree, existing),
             existing,
           );
           return undefined;
@@ -177,12 +179,12 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   // Best-effort: the registration already succeeded — a checklist failure must
   // not surface as an error dialog on top of the success dialog.
   if (r.recordingId) {
-    const parts = deriveParts(snapshot);
+    const tree = derivePartTree(snapshot);
     await runCreditsFlow(
       context,
       runWithClient,
       r.recordingId,
-      buildPrefillRows(parts, []),
+      buildPrefillTree(tree, []),
       [],
     ).catch(() => undefined);
   }
@@ -220,10 +222,10 @@ async function runCreditsFlow(
   context: ExtensionContext<"1.0.0">,
   run: ClientRunner,
   recordingId: string,
-  prefillRows: CreditRow[],
+  prefillNodes: PrefillNode[],
   existing: ExistingCredit[],
 ): Promise<void> {
-  const prefillJson = JSON.stringify({ rows: prefillRows }).replace(/</g, "\\u003c");
+  const prefillJson = JSON.stringify({ tree: prefillNodes }).replace(/</g, "\\u003c");
   const injected = creditsHtml.replace(
     "</head>",
     `<script>window.__PICA_PREFILL__ = ${prefillJson};</script></head>`,
@@ -234,18 +236,18 @@ async function runCreditsFlow(
     CREDITS_H,
   );
 
-  let answer: { cancelled?: boolean; rows?: CreditRow[] };
+  let answer: { cancelled?: boolean; tree?: FrontierNode[] };
   try {
     answer = JSON.parse(raw);
   } catch {
     return; // dialog dismissed
   }
-  if (answer.cancelled || !Array.isArray(answer.rows)) return; // skip writes nothing
+  if (answer.cancelled || !Array.isArray(answer.tree)) return; // skip writes nothing
 
   const outcomes = (await context.ui.withinProgressDialog(
     "saving credits…",
     { progress: 30 },
-    async () => run((c) => saveCredits(c, recordingId, answer.rows!, existing)),
+    async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing)),
   )) as CreditOutcome[];
 
   // Link the RECORDING page — that's where recording credits render in
