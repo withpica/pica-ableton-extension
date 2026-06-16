@@ -23,6 +23,23 @@ export interface CreditOutcome {
   error?: string;
 }
 
+/** Compact one-line summary for the consolidated final report. */
+export function summarizeCredits(outcomes: CreditOutcome[]): string {
+  if (outcomes.length === 0) return "credits: none saved.";
+  const saved = outcomes.filter(
+    (o) => o.status === "saved_linked" || o.status === "saved_draft",
+  ).length;
+  const draft = outcomes.filter((o) => o.status === "saved_draft").length;
+  const unchanged = outcomes.filter((o) => o.status === "skipped_existing").length;
+  const failed = outcomes.filter((o) => o.status === "failed").length;
+  const parts: string[] = [];
+  if (saved > 0) parts.push(`${saved} saved`);
+  if (draft > 0) parts.push(`${draft} draft`);
+  if (unchanged > 0) parts.push(`${unchanged} unchanged`);
+  if (failed > 0) parts.push(`${failed} failed`);
+  return `credits: ${parts.join(", ")}.`;
+}
+
 const ROLE = "Performer"; // v1 default — spec decision 5
 
 function norm(s: string): string {

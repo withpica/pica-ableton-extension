@@ -7,9 +7,11 @@ import {
   serializeFrontier,
   loadExistingCredits,
   saveCredits,
+  summarizeCredits,
   type CreditRow,
   type ExistingCredit,
   type FrontierNode,
+  type CreditOutcome,
 } from "../src/pica/credits";
 import { derivePartTree, type PartNode } from "../src/session/parts";
 import { PicaMcpError } from "../src/pica/mcpClient";
@@ -267,5 +269,40 @@ describe("saveCredits", () => {
 
     expect(outcomes[0]).toMatchObject({ status: "failed", error: "server error" });
     expect(outcomes[1]).toMatchObject({ status: "saved_draft" });
+  });
+});
+
+describe("summarizeCredits", () => {
+  const oc = (status: CreditOutcome["status"]): CreditOutcome => ({
+    creditedName: "x",
+    instrument: "y",
+    status,
+  });
+
+  it("reports none saved for an empty list", () => {
+    expect(summarizeCredits([])).toBe("credits: none saved.");
+  });
+
+  it("counts saved (linked + draft) and surfaces draft/unchanged/failed, omitting zero categories", () => {
+    const out = [
+      oc("saved_linked"),
+      oc("saved_linked"),
+      oc("saved_draft"),
+      oc("skipped_existing"),
+      oc("skipped_existing"),
+      oc("failed"),
+    ];
+    expect(summarizeCredits(out)).toBe(
+      "credits: 3 saved, 1 draft, 2 unchanged, 1 failed.",
+    );
+  });
+
+  it("shows only the non-zero category", () => {
+    expect(summarizeCredits([oc("saved_linked"), oc("saved_linked")])).toBe(
+      "credits: 2 saved.",
+    );
+    expect(summarizeCredits([oc("skipped_existing")])).toBe(
+      "credits: 1 unchanged.",
+    );
   });
 });
