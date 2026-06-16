@@ -3,6 +3,7 @@
 import { initialize, type ActivationContext, type ExtensionContext } from "@ableton-extensions/sdk";
 import interfaceHtml from "../ui/interface.html";
 import creditsHtml from "../ui/credits.html";
+import writersHtml from "../ui/writers.html";
 import { PicaMcpClient } from "./pica/mcpClient";
 import { readApiKey } from "./pica/keyStore";
 import { readSong, type SongLike } from "./session/read";
@@ -25,8 +26,10 @@ import {
   type CreditRow,
   type ExistingCredit,
 } from "./pica/credits";
+import { saveWriters, summarizeWriters, type WriterOutcome } from "./pica/writers";
 import { messageHtml, linkMessageHtml, successBody, duplicateChoiceHtml } from "./dialogHtml";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
+import type { MasterOwnershipOutcome } from "./pica/ownership";
 
 const BASE_URL = "https://withpica.com";
 const PANEL_W = 380;
@@ -186,8 +189,14 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
 
   if (!result || typeof result !== "object" || !("inspectUrl" in result)) return;
 
-  const r = result as { workId: string; recordingId: string; completenessScore?: number; inspectUrl: string };
-  await showLink(context, "pica — registered", successBody(r.completenessScore), r.inspectUrl);
+  const r = result as {
+    workId: string;
+    recordingId: string;
+    completenessScore?: number;
+    inspectUrl: string;
+    masterOwnership?: MasterOwnershipOutcome["status"];
+  };
+  await showLink(context, "pica — registered", successBody(r.completenessScore, r.masterOwnership), r.inspectUrl);
 
   // Stage 2: offer the attribution checklist right after register (skippable).
   // Best-effort: the registration already succeeded — a checklist failure must
@@ -202,10 +211,14 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
       [],
     ).catch(() => undefined);
   }
+
+  await runWritersFlow(context, runWithClient, r.workId).catch(() => undefined);
 }
 
 const CREDITS_W = 430;
 const CREDITS_H = 520;
+const WRITERS_W = 380;
+const WRITERS_H = 440;
 
 function formatOutcomes(outcomes: CreditOutcome[]): string {
   if (outcomes.length === 0) return "no rows had a performer name — nothing saved.";
@@ -268,6 +281,40 @@ async function runCreditsFlow(
     "pica — credits",
     formatOutcomes(outcomes),
     `${BASE_URL}/inspect/recordings/${recordingId}`,
+  );
+}
+
+/** The Stage-3 writers step: names-only panel → pica_work_writers_add → outcome report. */
+async function runWritersFlow(
+  context: ExtensionContext<"1.0.0">,
+  run: ClientRunner,
+  workId: string,
+): Promise<void> {
+  const raw = await context.ui.showModalDialog(
+    `data:text/html,${encodeURIComponent(writersHtml)}`,
+    WRITERS_W,
+    WRITERS_H,
+  );
+
+  let answer: { cancelled?: boolean; names?: string[] };
+  try {
+    answer = JSON.parse(raw);
+  } catch {
+    return; // dialog dismissed
+  }
+  if (answer.cancelled || !Array.isArray(answer.names)) return; // skip writes nothing
+
+  const outcomes = (await context.ui.withinProgressDialog(
+    "saving writers…",
+    { progress: 30 },
+    async () => run((c) => saveWriters(c, workId, answer.names!)),
+  )) as WriterOutcome[];
+
+  await showLink(
+    context,
+    "pica — writers",
+    summarizeWriters(outcomes) || "no writers added.",
+    `${BASE_URL}/inspect/works/${workId}`,
   );
 }
 

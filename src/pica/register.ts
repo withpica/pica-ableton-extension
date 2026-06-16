@@ -1,6 +1,7 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
 import { PicaMcpClient, PicaMcpError } from "./mcpClient";
+import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./ownership";
 
 export interface RegisterInput {
   title: string;
@@ -16,6 +17,7 @@ export interface RegisterResult {
   recordingId: string;
   completenessScore?: number;
   inspectUrl: string;
+  masterOwnership?: MasterOwnershipOutcome["status"];
 }
 
 export class DuplicateWorkError extends Error {
@@ -134,11 +136,24 @@ export async function registerSet(client: PicaMcpClient, input: RegisterInput): 
     versionType: "master",
   });
 
+  // Never proceed without an id: an undefined recording_id would silently corrupt
+  // the ownership write (JSON.stringify drops undefined values).
+  if (!recordingId) {
+    throw new Error(
+      "PICA created the recording but returned no id — aborting before ownership capture.",
+    );
+  }
+
+  // 4. Capture master ownership (100% to the registering org). Insert-once; a 401
+  // propagates so the reconnect path re-runs, any other failure is reported not thrown.
+  const ownership = await ensureMasterOwnership(client, recordingId);
+
   return {
     workId: work.id,
     recordingId,
     completenessScore: work.completeness_score,
     inspectUrl: `https://withpica.com/inspect/works/${work.id}`,
+    masterOwnership: ownership.status,
   };
 }
 

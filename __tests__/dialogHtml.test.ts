@@ -53,6 +53,28 @@ describe("successBody", () => {
     expect(body).toContain("now in your catalog");
     expect(body).not.toContain("completeness");
   });
+
+  it("successBody shows the master-ownership line when created", () => {
+    const html = successBody(12, "created");
+    expect(html).toContain("master ownership");
+    expect(html).toContain("100%");
+  });
+
+  it("successBody shows nothing about ownership when status is undefined", () => {
+    expect(successBody(12)).not.toContain("master ownership");
+  });
+
+  it("successBody notes a failed ownership write so it is not silent", () => {
+    const html = successBody(undefined, "failed");
+    expect(html).toContain("master ownership");
+    expect(html).toContain("could not be saved");
+  });
+
+  it("successBody shows 'already set' for skipped_existing ownership", () => {
+    const html = successBody(12, "skipped_existing");
+    expect(html).toContain("master ownership");
+    expect(html).toContain("already set");
+  });
 });
 
 describe("pasteKeyHtml", () => {
