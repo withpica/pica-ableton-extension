@@ -3,13 +3,15 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   mergeRowsByPerson,
-  buildPrefillRows,
+  buildPrefillTree,
+  serializeFrontier,
   loadExistingCredits,
   saveCredits,
   type CreditRow,
   type ExistingCredit,
+  type FrontierNode,
 } from "../src/pica/credits";
-import type { Part } from "../src/session/parts";
+import { derivePartTree, type PartNode } from "../src/session/parts";
 import { PicaMcpError } from "../src/pica/mcpClient";
 
 function fakeClient() {
@@ -18,13 +20,22 @@ function fakeClient() {
   };
 }
 
-const part = (over: Partial<Part> & { instrumentLabel: string }): Part => ({
-  key: `0:${over.instrumentLabel}`,
-  trackName: over.instrumentLabel,
+const leaf = (instrumentLabel: string, kind: PartNode["kind"] = "audio"): PartNode => ({
+  key: `k:${instrumentLabel}`,
+  instrumentLabel,
+  trackName: instrumentLabel,
+  kind,
   deviceNames: [],
   sampleFiles: [],
-  kind: "audio",
-  ...over,
+});
+const group = (instrumentLabel: string, children: PartNode[]): PartNode => ({
+  key: `g:${instrumentLabel}`,
+  instrumentLabel,
+  trackName: instrumentLabel,
+  kind: "group",
+  deviceNames: [],
+  sampleFiles: [],
+  children,
 });
 
 describe("mergeRowsByPerson", () => {
@@ -43,24 +54,117 @@ describe("mergeRowsByPerson", () => {
   });
 });
 
-describe("buildPrefillRows", () => {
-  it("fills performer names from existing credits matched by instrument", () => {
-    const parts = [part({ instrumentLabel: "Drums" }), part({ instrumentLabel: "Vox" })];
-    const existing: ExistingCredit[] = [
-      { id: "c1", credited_name: "Dave Smith", role: "Performer", instrument: "drums, bass" },
-    ];
-    const rows = buildPrefillRows(parts, existing);
-    expect(rows[0]).toEqual({ instrument: "Drums", performerName: "Dave Smith" });
-    expect(rows[1]).toEqual({ instrument: "Vox", performerName: "" });
+describe("buildPrefillTree", () => {
+  it("fills a leaf's performer from an existing credit matched by instrument", () => {
+    const nodes = buildPrefillTree(
+      [leaf("Drums"), leaf("Vox")],
+      [{ id: "c1", credited_name: "Dave Smith", role: "Performer", instrument: "drums, bass" }],
+    );
+    expect(nodes[0]).toMatchObject({ instrument: "Drums", performerName: "Dave Smith", expanded: false });
+    expect(nodes[1]).toMatchObject({ instrument: "Vox", performerName: "" });
   });
 
-  it("appends existing credits that match no detected part", () => {
-    const rows = buildPrefillRows([part({ instrumentLabel: "Vox" })], [
-      { id: "c1", credited_name: "Maria", role: "Performer", instrument: "tambourine" },
+  it("expands a group when a child matches an existing credit, leaving the group name blank", () => {
+    const nodes = buildPrefillTree(
+      [group("Live Drums", [leaf("Kick"), leaf("Snare")])],
+      [{ id: "c1", credited_name: "Bob", role: "Performer", instrument: "kick" }],
+    );
+    expect(nodes[0]).toMatchObject({ kind: "group", expanded: true, performerName: "" });
+    expect(nodes[0]!.children![0]).toMatchObject({ instrument: "Kick", performerName: "Bob" });
+  });
+
+  it("prefills a collapsed group from an existing credit on the group label", () => {
+    const nodes = buildPrefillTree(
+      [group("Live Drums", [leaf("Kick"), leaf("Snare")])],
+      [{ id: "c1", credited_name: "Bob", role: "Performer", instrument: "Live Drums" }],
+    );
+    expect(nodes[0]).toMatchObject({ kind: "group", expanded: false, performerName: "Bob" });
+    expect(nodes[0]!.children!.every((c) => c.performerName === "")).toBe(true);
+  });
+
+  it("appends existing credits that match no node as standalone leaf nodes", () => {
+    const nodes = buildPrefillTree(
+      [leaf("Vox")],
+      [{ id: "c1", credited_name: "Maria", role: "Performer", instrument: "tambourine" }],
+    );
+    expect(nodes).toHaveLength(2);
+    expect(nodes[1]).toMatchObject({ instrument: "tambourine", performerName: "Maria", kind: "audio", expanded: false });
+  });
+
+  it("appends a group-label credit as an extra when a child already expanded the group", () => {
+    const nodes = buildPrefillTree(
+      [group("Live Drums", [leaf("Kick")])],
+      [
+        { id: "c1", credited_name: "ChildPerson", role: "Performer", instrument: "kick" },
+        { id: "c2", credited_name: "GroupPerson", role: "Performer", instrument: "Live Drums" },
+      ],
+    );
+    // c1 expands the group via the child; c2 (group label) is left unclaimed → appended as an extra leaf
+    expect(nodes[0]).toMatchObject({ kind: "group", expanded: true, performerName: "" });
+    expect(nodes[0]!.children![0]).toMatchObject({ instrument: "Kick", performerName: "ChildPerson" });
+    expect(nodes[1]).toMatchObject({ instrument: "Live Drums", performerName: "GroupPerson", kind: "audio" });
+  });
+
+  it("expands all ancestors when a deeply nested grandchild matches a credit", () => {
+    const nodes = buildPrefillTree(
+      [group("DRUMS", [group("Live Drums", [leaf("Kick")])])],
+      [{ id: "c1", credited_name: "Bob", role: "Performer", instrument: "kick" }],
+    );
+    expect(nodes[0]).toMatchObject({ kind: "group", expanded: true }); // outer
+    expect(nodes[0]!.children![0]).toMatchObject({ kind: "group", expanded: true }); // inner
+    expect(nodes[0]!.children![0]!.children![0]).toMatchObject({ instrument: "Kick", performerName: "Bob" });
+  });
+});
+
+describe("serializeFrontier", () => {
+  it("emits a collapsed group as one row and ignores its children", () => {
+    const tree: FrontierNode[] = [
+      { instrument: "Live Drums", performerName: "Bob", kind: "group", expanded: false,
+        children: [{ instrument: "Kick", performerName: "ignored", kind: "audio", expanded: false }] },
+    ];
+    expect(serializeFrontier(tree)).toEqual([{ instrument: "Live Drums", performerName: "Bob" }]);
+  });
+
+  it("emits an expanded group's children and omits the group itself", () => {
+    const tree: FrontierNode[] = [
+      { instrument: "GTRS", performerName: "", kind: "group", expanded: true, children: [
+        { instrument: "rhythm", performerName: "Ann", kind: "audio", expanded: false },
+        { instrument: "lead", performerName: "Cy", kind: "audio", expanded: false },
+      ] },
+    ];
+    expect(serializeFrontier(tree)).toEqual([
+      { instrument: "rhythm", performerName: "Ann" },
+      { instrument: "lead", performerName: "Cy" },
     ]);
-    expect(rows).toEqual([
-      { instrument: "Vox", performerName: "" },
-      { instrument: "tambourine", performerName: "Maria" },
+  });
+
+  it("recurses into nested expanded groups", () => {
+    const tree: FrontierNode[] = [
+      { instrument: "DRUMS", performerName: "", kind: "group", expanded: true, children: [
+        { instrument: "Live Drums", performerName: "", kind: "group", expanded: true, children: [
+          { instrument: "Kick", performerName: "Bob", kind: "audio", expanded: false },
+        ] },
+      ] },
+    ];
+    expect(serializeFrontier(tree)).toEqual([{ instrument: "Kick", performerName: "Bob" }]);
+  });
+
+  it("emits plain leaves as themselves", () => {
+    const tree: FrontierNode[] = [{ instrument: "Vox", performerName: "Maria", kind: "audio", expanded: false }];
+    expect(serializeFrontier(tree)).toEqual([{ instrument: "Vox", performerName: "Maria" }]);
+  });
+});
+
+describe("end-to-end frontier from a derived tree", () => {
+  it("a collapsed drum group with no saved credits serialises to one blank-name row", () => {
+    const tree = derivePartTree({ tempo: 120, rootNote: 0, scaleName: "Major", tracks: [
+      { name: "Drums", type: "group", deviceNames: [], sampleFilePaths: [], groupIndex: null, clipCount: 0 },
+      { name: "Kick", type: "audio", deviceNames: ["EQ"], sampleFilePaths: [], groupIndex: 0, clipCount: 0 },
+    ] });
+    const prefill = buildPrefillTree(tree, []);
+    // collapsed group → one row carrying the group label
+    expect(serializeFrontier(prefill)).toEqual([
+      { instrument: "Drums", performerName: "" },
     ]);
   });
 });
