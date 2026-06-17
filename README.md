@@ -4,7 +4,7 @@ Register your Ableton Live Set as a **work + master recording** in [PICA](https:
 
 Right-click a track → **Register Set in PICA** → a confirm panel shows the captured session (tracks, devices, samples, tempo, key). You add a title + artist; it creates one `work` and its master `recording` in your catalog and gives you the link. The full session snapshot is stashed on the work for later enrichment. Nothing is written until you confirm.
 
-This covers **Stages 1–2** of ADR-259 ("PICA inside the DAW") plus the register-flow refinements that followed: register-from-Set, the attribution checklist (per-instrument draft credits, expandable per group), composition writers, automatic Splice-sample attribution, master-ownership capture, an existing-people typeahead for the artist/credit/writer fields, and a single consolidated final report at the end. Later stages add bounce/stem upload and deliver-from-DAW.
+This covers **Stages 1–3** of ADR-259 ("PICA inside the DAW") plus the register-flow refinements that followed: register-from-Set, the attribution checklist (per-instrument draft credits, expandable per group), composition writers, automatic Splice-sample attribution, master-ownership capture, an existing-people typeahead for the artist/credit/writer fields, a single consolidated final report, and uploading audio (stems rendered in-extension; the master via a one-click web upload). A later stage adds deliver-from-DAW.
 
 ## Requirements
 
@@ -103,10 +103,18 @@ and any Splice samples used in the Set are auto-attributed to the recording
 skipping or a failure is reported in the final report, never blocks it, and
 re-running never duplicates.
 
+**Send stems / master.** From the final report (or right-click → **Send stems
+to PICA** on an already-registered Set), pick which arrangement audio tracks to
+upload — each is rendered and filed as a `stem` under the recording, auto-linked.
+Rendering is **pre-FX**, so freeze & flatten a track first to capture it as you
+hear it. For the **master**, use the "upload your master" link to the recording's
+page and drop your exported mixdown there (browser upload, attaches automatically).
+Each stem is best-effort and reported individually; files over 800MB are skipped.
+
 ## How it works
 
 - Reads the **whole Set** via `context.application.song` — independent of which track you right-clicked (the SDK has no global/Set menu scope, so the action is offered on tracks).
-- Writes over PICA's **MCP JSON-RPC endpoint** (`/api/mcp`): declares identity (`pica_introduce_self`), then `pica_works_create` (with the session snapshot in `metadata`) and `pica_recordings_create`, followed by the capture steps — `pica_recording_splits_create` (master ownership), `pica_recording_credits_*` (performer credits), `pica_work_writers_add`, and `pica_recording_samples_add` (Splice). This instrumented path makes the new work appear **live in PICA's `/inspect` activity rail**.
+- Writes over PICA's **MCP JSON-RPC endpoint** (`/api/mcp`): declares identity (`pica_introduce_self`), then `pica_works_create` (with the session snapshot in `metadata`) and `pica_recordings_create`, followed by the capture steps — `pica_recording_splits_create` (master ownership), `pica_recording_credits_*` (performer credits), `pica_work_writers_add`, and `pica_recording_samples_add` (Splice). Stems render via the SDK's `renderPreFxAudio` and upload direct-to-storage (`pica_audio_presigned_upload` → HTTP PUT → `pica_audio_complete_upload` → `pica_audio_analyze`). This instrumented path makes the new work appear **live in PICA's `/inspect` activity rail**.
 - **Architecture:** a pure, host-independent core (`src/pica/*`, `src/session/snapshot.ts`) unit-tested with Vitest, plus thin Ableton host glue (`src/extension.ts`, `ui/interface.html`). Run `npm test` to exercise the core without Live.
 
 ## License / IP
