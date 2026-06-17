@@ -32,7 +32,7 @@
     </div>
 
     <script>
-      // Injected by extension.ts: { stems: [{ name, label }], masterUrl }.
+      // Injected by extension.ts: { stems: [{ index, name, label }], masterUrl }.
       var prefill = window.__PICA_STEMS__ || { stems: [], masterUrl: "" };
       var rowsEl = document.getElementById("rows");
       var ml = document.getElementById("masterlink");
@@ -48,6 +48,8 @@
         var label = document.createElement("input");
         label.value = s.label || s.name || "";
         label.placeholder = "stem label";
+        // Index is the join key back to render targets (names can collide).
+        div.dataset.index = String(s.index);
         div.dataset.name = s.name || "";
         div.appendChild(sel);
         div.appendChild(label);
@@ -68,7 +70,7 @@
         rowsEl.querySelectorAll(".stem-row").forEach(function (row) {
           var include = row.querySelector("select").value === "include";
           var label = row.querySelector("input").value.trim();
-          stems.push({ name: row.dataset.name, include: include, label: label || row.dataset.name });
+          stems.push({ index: Number(row.dataset.index), include: include, label: label || row.dataset.name });
         });
         post({ stems: stems });
       });

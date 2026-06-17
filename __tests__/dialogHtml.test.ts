@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escapeHtml, messageHtml, linkMessageHtml, finalReportHtml, type RegisterReport, pasteKeyHtml, duplicateChoiceHtml } from "../src/dialogHtml";
+import { escapeHtml, messageHtml, linkMessageHtml, finalReportHtml, type RegisterReport, pasteKeyHtml, duplicateChoiceHtml, titlePromptHtml } from "../src/dialogHtml";
 
 describe("escapeHtml", () => {
   it("escapes &, <, > and quotes", () => {
@@ -135,5 +135,12 @@ describe("duplicateChoiceHtml", () => {
   });
   it("escapes the title", () => {
     expect(duplicateChoiceHtml('<x>', ["alternate"])).toContain("&lt;x&gt;");
+  });
+});
+
+describe("titlePromptHtml", () => {
+  it("renders a single title input and the prompt heading", () => {
+    expect(titlePromptHtml()).toContain('id="t"');
+    expect(titlePromptHtml()).toContain("which work?");
   });
 });
