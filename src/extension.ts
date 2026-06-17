@@ -29,6 +29,7 @@ import {
   type PrefillNode,
 } from "./pica/credits";
 import { saveWriters, type WriterOutcome } from "./pica/writers";
+import { fetchPeopleCandidates, candidateNames, resolvePersonId, type PersonCandidate } from "./pica/people";
 import { detectSpliceSamples, saveSpliceSamples } from "./pica/samples";
 import {
   messageHtml,
@@ -83,11 +84,18 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   const metadata = buildMetadata(snapshot);
   const derivedKey = String(metadata["key"] ?? "");
 
+  // Fetch the org's people once, up front — powers the artist typeahead here and
+  // the credit/writer typeaheads later (one fetch for the whole flow). Best-effort.
+  const candidates = await fetchPeopleCandidates(
+    new PicaMcpClient({ baseUrl: BASE_URL, apiKey }),
+  ).catch(() => []);
+
   // 2. Confirm-and-edit panel. Title + artist are user-entered (the Set has neither).
   const prefillJson = JSON.stringify({ summary, key: derivedKey, workType: "song" }).replace(/</g, "\\u003c");
+  const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
   const injected = interfaceHtml.replace(
     "</head>",
-    `<script>window.__PICA_PREFILL__ = ${prefillJson};</script></head>`,
+    `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
   );
   const url = `data:text/html,${encodeURIComponent(injected)}`;
   const raw = await context.ui.showModalDialog(url, PANEL_W, PANEL_H);
@@ -99,6 +107,8 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     return; // dialog dismissed without a valid payload
   }
   if (answer.cancelled || !answer.title || !answer.artistName) return;
+
+  const primaryArtistId = resolvePersonId(answer.artistName, candidates);
 
   // 3. Register (declare identity → dup-check → create), with a cancellable progress dialog.
   const client = new PicaMcpClient({ baseUrl: BASE_URL, apiKey });
@@ -140,6 +150,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           key: answer.key || derivedKey,
           metadata,
           summary,
+          primaryArtistId,
         });
       });
     },
@@ -186,11 +197,12 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
             title: answer.title!,
             artistName: answer.artistName!,
             versionType,
+            primaryArtistId,
           }),
         );
         const masterOwnership = await captureOwnership(recordingId);
         const spliceLogged = await captureSplice(recordingId);
-        const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, []), []);
+        const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, []), [], candidates);
         await showReport(context, {
           action: "version",
           title: answer.title!,
@@ -222,13 +234,14 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
               title: answer.title!,
               artistName: answer.artistName!,
               versionType: "master",
+              primaryArtistId,
             }),
           );
           recordingId = created.recordingId;
           masterOwnership = await captureOwnership(recordingId);
         }
         const spliceLogged = await captureSplice(recordingId);
-        const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, existing), existing);
+        const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, existing), existing, candidates);
         await showReport(context, {
           action: "existing",
           title: answer.title!,
@@ -279,10 +292,11 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
       r.recordingId,
       buildPrefillTree(tree, []),
       [],
+      candidates,
     ).catch((e) => ({ state: "error" as const, error: e instanceof Error ? e.message : String(e) }));
   }
 
-  const writers = await runWritersFlow(context, runWithClient, r.workId).catch(
+  const writers = await runWritersFlow(context, runWithClient, r.workId, candidates).catch(
     (e) => ({ state: "error" as const, error: e instanceof Error ? e.message : String(e) }),
   );
 
@@ -314,11 +328,13 @@ async function runCreditsFlow(
   recordingId: string,
   prefillNodes: PrefillNode[],
   existing: ExistingCredit[],
+  candidates: PersonCandidate[],
 ): Promise<StepResult<CreditOutcome>> {
   const prefillJson = JSON.stringify({ tree: prefillNodes }).replace(/</g, "\\u003c");
+  const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
   const injected = creditsHtml.replace(
     "</head>",
-    `<script>window.__PICA_PREFILL__ = ${prefillJson};</script></head>`,
+    `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
   );
   const raw = await context.ui.showModalDialog(
     `data:text/html,${encodeURIComponent(injected)}`,
@@ -338,7 +354,7 @@ async function runCreditsFlow(
     const outcomes = (await context.ui.withinProgressDialog(
       "saving credits…",
       { progress: 30 },
-      async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing)),
+      async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing, candidates)),
     )) as CreditOutcome[];
     return { state: "saved", outcomes };
   } catch (e) {
@@ -351,9 +367,15 @@ async function runWritersFlow(
   context: ExtensionContext<"1.0.0">,
   run: ClientRunner,
   workId: string,
+  candidates: PersonCandidate[],
 ): Promise<StepResult<WriterOutcome>> {
+  const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
+  const injected = writersHtml.replace(
+    "</head>",
+    `<script>window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
+  );
   const raw = await context.ui.showModalDialog(
-    `data:text/html,${encodeURIComponent(writersHtml)}`,
+    `data:text/html,${encodeURIComponent(injected)}`,
     WRITERS_W,
     WRITERS_H,
   );

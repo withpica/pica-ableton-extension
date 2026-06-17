@@ -29,7 +29,8 @@
     <input id="title" autocomplete="off" placeholder="name this work" />
 
     <label for="artist">artist name *</label>
-    <input id="artist" autocomplete="off" placeholder="primary artist" />
+    <input id="artist" autocomplete="off" placeholder="primary artist" list="people" />
+    <datalist id="people"></datalist>
 
     <div class="row">
       <div>
@@ -65,6 +66,10 @@
       document.getElementById("summary").textContent = prefill.summary || "";
       if (prefill.key) document.getElementById("key").value = prefill.key;
       if (prefill.workType) document.getElementById("workType").value = prefill.workType;
+
+      var peopleNames = window.__PICA_PEOPLE_NAMES__ || [];
+      var dl = document.getElementById("people");
+      if (dl) peopleNames.forEach(function (n) { var o = document.createElement("option"); o.value = n; dl.appendChild(o); });
 
       function post(resultObj) {
         var msg = { method: "close_and_send", params: [JSON.stringify(resultObj)] };

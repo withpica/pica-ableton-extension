@@ -24,6 +24,7 @@
     <h1>who wrote this?</h1>
     <div class="hint">list the songwriters. leave blank to skip.</div>
     <div id="rows"></div>
+    <datalist id="people"></datalist>
     <button class="add" id="add">+ add writer</button>
     <div class="actions">
       <button id="skip">skip — do later</button>
@@ -32,6 +33,13 @@
 
     <script>
       var rowsEl = document.getElementById("rows");
+      var peopleNames = window.__PICA_PEOPLE_NAMES__ || [];
+      var dl = document.getElementById("people");
+      peopleNames.forEach(function (n) {
+        var o = document.createElement("option");
+        o.value = n;
+        dl.appendChild(o);
+      });
 
       function addRow(name) {
         var div = document.createElement("div");
@@ -39,6 +47,7 @@
         var inp = document.createElement("input");
         inp.placeholder = "songwriter name";
         inp.value = name || "";
+        inp.setAttribute("list", "people");
         var rm = document.createElement("button");
         rm.className = "remove";
         rm.textContent = "×";
