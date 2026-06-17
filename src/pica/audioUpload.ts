@@ -58,9 +58,9 @@ export async function uploadRenderedStem(
   const presign = (await deps.client.callTool(
     "pica_audio_presigned_upload",
     presignedArgs({ filename: input.fileName, fileSize: input.fileSize, workId: input.workId }),
-  )) as { upload_url: string; upload_id: string; key: string; bucket: string };
+  )) as { uploadUrl: string; uploadId: string; key: string; bucket: string };
 
-  const res = await deps.fetchFn(presign.upload_url, {
+  const res = await deps.fetchFn(presign.uploadUrl, {
     method: "PUT",
     body: deps.openStream(input.wavPath) as unknown as BodyInit,
     // @ts-expect-error Node fetch requires duplex for a stream body
@@ -72,14 +72,14 @@ export async function uploadRenderedStem(
   const done = (await deps.client.callTool(
     "pica_audio_complete_upload",
     completeArgs({
-      uploadId: presign.upload_id, key: presign.key, bucket: presign.bucket,
+      uploadId: presign.uploadId, key: presign.key, bucket: presign.bucket,
       filename: input.fileName, fileSize: input.fileSize, recordingId: input.recordingId, stemLabel: input.stemLabel,
     }),
-  )) as { id?: string; file_id?: string };
+  )) as { audioFileId?: string };
 
-  const fileId = done?.id ?? done?.file_id;
+  const fileId = done?.audioFileId;
   if (fileId) {
-    await deps.client.callTool("pica_audio_analyze", { file_id: fileId }).catch(() => undefined);
+    await deps.client.callTool("pica_audio_analyze", { id: fileId }).catch(() => undefined);
   }
   return { fileId };
 }

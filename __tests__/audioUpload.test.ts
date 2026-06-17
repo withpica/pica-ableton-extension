@@ -46,8 +46,8 @@ describe("uploadRenderedStem", () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const client = { callTool: async (name: string, args: Record<string, unknown>) => {
       calls.push({ name, args });
-      if (name === "pica_audio_presigned_upload") return { upload_url: "https://s3/put", upload_id: "u1", key: "k", bucket: "b" };
-      if (name === "pica_audio_complete_upload") return { id: "f1" };
+      if (name === "pica_audio_presigned_upload") return { uploadUrl: "https://s3/put", uploadId: "u1", key: "k", bucket: "b" };
+      if (name === "pica_audio_complete_upload") return { audioFileId: "f1" };
       return {};
     } } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
     const fetchFn = (async () => ({ ok: putOk, status: putOk ? 200 : 500 })) as unknown as typeof fetch;
@@ -66,7 +66,7 @@ describe("uploadRenderedStem", () => {
       "pica_audio_presigned_upload", "pica_audio_complete_upload", "pica_audio_analyze",
     ]);
     expect(h.calls[1]!.args).toMatchObject({ recording_id: "r1", file_type: "stem", stem_label: "Drums", file_size: 10 });
-    expect(h.calls[2]!.args).toEqual({ file_id: "f1" });
+    expect(h.calls[2]!.args).toEqual({ id: "f1" });
   });
 
   it("throws if the S3 PUT fails (and does not complete)", async () => {
