@@ -51,14 +51,14 @@ describe("uploadRenderedStem", () => {
       return {};
     } } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
     const fetchFn = (async () => ({ ok: putOk, status: putOk ? 200 : 500 })) as unknown as typeof fetch;
-    const openStream = (_p: string) => ("STREAM" as unknown as import("node:fs").ReadStream);
-    return { calls, client, fetchFn, openStream };
+    const readFile = (async (_p: string) => new Uint8Array([1, 2, 3])) as unknown as (p: string) => Promise<Uint8Array>;
+    return { calls, client, fetchFn, readFile };
   }
 
   it("presigns, PUTs, completes (linked to recording), and analyzes", async () => {
     const h = harness();
     const out = await uploadRenderedStem(
-      { client: h.client, fetchFn: h.fetchFn, openStream: h.openStream },
+      { client: h.client, fetchFn: h.fetchFn, readFile: h.readFile },
       { wavPath: "/tmp/Drums.wav", fileName: "Drums.wav", fileSize: 10, recordingId: "r1", workId: "w1", stemLabel: "Drums" },
     );
     expect(out.fileId).toBe("f1");
@@ -72,7 +72,7 @@ describe("uploadRenderedStem", () => {
   it("throws if the S3 PUT fails (and does not complete)", async () => {
     const h = harness(false);
     await expect(uploadRenderedStem(
-      { client: h.client, fetchFn: h.fetchFn, openStream: h.openStream },
+      { client: h.client, fetchFn: h.fetchFn, readFile: h.readFile },
       { wavPath: "/tmp/x.wav", fileName: "x.wav", fileSize: 10, recordingId: "r1", workId: "w1", stemLabel: "x" },
     )).rejects.toThrow(/PUT failed/);
     expect(h.calls.map((c) => c.name)).toEqual(["pica_audio_presigned_upload"]);

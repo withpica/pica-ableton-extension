@@ -5,7 +5,8 @@ import interfaceHtml from "../ui/interface.html";
 import creditsHtml from "../ui/credits.html";
 import writersHtml from "../ui/writers.html";
 import audioHtml from "../ui/audio.html";
-import { createReadStream, statSync } from "node:fs";
+import { statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { PicaMcpClient } from "./pica/mcpClient";
 import { readApiKey } from "./pica/keyStore";
 import { readSong, type SongLike } from "./session/read";
@@ -417,7 +418,7 @@ async function runSendStems(
           await update(`uploading ${label}…`, pct);
           await run((c) =>
             uploadRenderedStem(
-              { client: c, fetchFn: fetch, openStream: createReadStream },
+              { client: c, fetchFn: fetch, readFile },
               { wavPath, fileName: `${label}.wav`, fileSize: size, recordingId, workId, stemLabel: label },
             ),
           );

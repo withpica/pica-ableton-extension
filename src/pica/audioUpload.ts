@@ -1,7 +1,6 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
 import { type PicaMcpClient } from "./mcpClient";
-import { createReadStream } from "node:fs";
 
 export const MAX_UPLOAD_BYTES = 800 * 1024 * 1024; // presigned-upload contract
 
@@ -47,10 +46,10 @@ export function completeArgs(input: {
 interface UploadDeps {
   client: PicaMcpClient;
   fetchFn: typeof fetch;
-  openStream: (path: string) => ReturnType<typeof createReadStream>;
+  readFile: (path: string) => Promise<Uint8Array>;
 }
 
-/** presign → PUT (streamed) → complete (linked to the recording) → analyze (best-effort). */
+/** presign → PUT (buffered, Content-Length) → complete (linked to the recording) → analyze (best-effort). */
 export async function uploadRenderedStem(
   deps: UploadDeps,
   input: { wavPath: string; fileName: string; fileSize: number; recordingId: string; workId?: string; stemLabel: string },
@@ -60,12 +59,14 @@ export async function uploadRenderedStem(
     presignedArgs({ filename: input.fileName, fileSize: input.fileSize, workId: input.workId }),
   )) as { uploadUrl: string; uploadId: string; key: string; bucket: string };
 
+  const body = await deps.readFile(input.wavPath);
   const res = await deps.fetchFn(presign.uploadUrl, {
     method: "PUT",
-    body: deps.openStream(input.wavPath) as unknown as BodyInit,
-    // @ts-expect-error Node fetch requires duplex for a stream body
-    duplex: "half",
-    headers: { "content-type": contentTypeFor(input.fileName) },
+    body: body as unknown as BodyInit,
+    headers: {
+      "content-type": contentTypeFor(input.fileName),
+      "content-length": String(body.byteLength),
+    },
   });
   if (!res.ok) throw new Error(`upload PUT failed: ${res.status}`);
 
