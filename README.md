@@ -4,7 +4,7 @@ Register your Ableton Live Set as a **work + master recording** in [PICA](https:
 
 Right-click a track → **Register Set in PICA** → a confirm panel shows the captured session (tracks, devices, samples, tempo, key). You add a title + artist; it creates one `work` and its master `recording` in your catalog and gives you the link. The full session snapshot is stashed on the work for later enrichment. Nothing is written until you confirm.
 
-This covers **Stages 1–2** of ADR-259 ("PICA inside the DAW") plus the register-flow refinements that followed: register-from-Set, the attribution checklist (per-instrument draft credits, expandable per group), composition writers, automatic Splice-sample attribution, master-ownership capture, and a single consolidated final report at the end. Later stages add bounce/stem upload and deliver-from-DAW.
+This covers **Stages 1–2** of ADR-259 ("PICA inside the DAW") plus the register-flow refinements that followed: register-from-Set, the attribution checklist (per-instrument draft credits, expandable per group), composition writers, automatic Splice-sample attribution, master-ownership capture, an existing-people typeahead for the artist/credit/writer fields, and a single consolidated final report at the end. Later stages add bounce/stem upload and deliver-from-DAW.
 
 ## Requirements
 
@@ -74,6 +74,8 @@ Install the packaged extension by dropping `dist/pica.ablx` onto Live's **Extens
 
 Right-click a track → **Register Set in PICA**. The confirm panel is editable; a duplicate title offers a choice instead of creating a second work.
 
+**Pick existing people.** The artist field (confirm panel) and the credit/writer name fields show a typeahead of the people already in your catalog — start typing and pick one to link the existing person instead of creating a near-duplicate. Picking is never forced: a genuinely new name still creates a person. (If the catalog can't be reached the fields just fall back to plain text.)
+
 The flow runs the capture steps quietly and ends in **one consolidated final
 report** — what was captured (master ownership, credits, writers, Splice
 samples, each reported honestly including skips/failures) plus three links to
@@ -93,7 +95,7 @@ Set) a checklist opens: one row per performed part, instrument pre-filled from t
 track/group name. Tracks inside a Live group can be credited individually
 (expand the group) or as the whole group collapsed — never both. Credits land on
 the master recording as `Performer` rows (one per person, instruments combined),
-auto-linked to existing people by exact name, kept as free-text drafts otherwise.
+linked to the person you pick from the typeahead (or auto-linked by exact name), kept as free-text drafts otherwise.
 
 **Writers + Splice.** A writers step captures composition writers for the work,
 and any Splice samples used in the Set are auto-attributed to the recording
