@@ -35,9 +35,18 @@ describe("completeArgs", () => {
     expect(completeArgs({
       uploadId: "u1", key: "k", bucket: "b", filename: "Drums.wav", fileSize: 123, recordingId: "r1", stemLabel: "Drums",
     })).toEqual({
-      upload_id: "u1", key: "k", bucket: "b", content_type: "audio/wav",
+      upload_id: "u1", key: "k", bucket: "b", filename: "Drums.wav", content_type: "audio/wav",
       file_size: 123, recording_id: "r1", file_type: "stem", stem_label: "Drums",
     });
+  });
+
+  it("includes every field complete_upload requires", () => {
+    const out = completeArgs({
+      uploadId: "u", key: "k", bucket: "b", filename: "D.wav", fileSize: 5, recordingId: "r", stemLabel: "D",
+    });
+    for (const k of ["upload_id", "key", "bucket", "filename", "content_type", "file_size"]) {
+      expect(out[k]).toBeDefined();
+    }
   });
 });
 

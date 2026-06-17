@@ -35,6 +35,7 @@ export function completeArgs(input: {
     upload_id: input.uploadId,
     key: input.key,
     bucket: input.bucket,
+    filename: input.filename,
     content_type: contentTypeFor(input.filename),
     file_size: input.fileSize,
     recording_id: input.recordingId,
