@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- Copyright (c) 2024-2026 Withpica Ltd. All rights reserved. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { --bg:#0A0A0A; --line:rgba(255,255,255,.10); --fg:#EDEDED; --muted:rgba(255,255,255,.45); --copper:#B87333; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; padding:16px; }
+      h1 { font-size:14px; font-weight:400; letter-spacing:.04em; margin:0 0 4px; }
+      .hint { color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; margin-bottom:6px; }
+      .note { color:var(--copper); font-size:11px; margin-bottom:10px; }
+      .note a { color:var(--copper); }
+      #rows { max-height:300px; overflow-y:auto; padding-right:10px; }
+      .stem-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+      .stem-row select { background:#1A1A1A; color:var(--fg); border:1px solid var(--line); padding:5px; font-size:12px; }
+      .stem-row input { background:transparent; border:1px solid var(--line); color:var(--fg); padding:6px 8px; font:12px ui-monospace,Menlo,monospace; flex:1; }
+      .stem-row input:focus { outline:none; border-color:var(--copper); }
+      .actions { display:flex; gap:8px; margin-top:16px; }
+      .actions button { flex:1; padding:9px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; font-size:12px; letter-spacing:.04em; }
+      .actions button.primary { border-color:var(--copper); color:var(--copper); }
+    </style>
+  </head>
+  <body>
+    <h1>send stems to pica</h1>
+    <div class="hint">pick the audio tracks to upload as stems.</div>
+    <div class="note">stems render <b>pre-fx</b> — freeze &amp; flatten a track first to capture it as you hear it. uploading your finished master? <a id="masterlink" target="_blank">upload it here</a>.</div>
+    <div id="rows"></div>
+    <div class="actions">
+      <button id="skip">cancel</button>
+      <button id="save" class="primary">upload stems</button>
+    </div>
+
+    <script>
+      // Injected by extension.ts: { stems: [{ name, label }], masterUrl }.
+      var prefill = window.__PICA_STEMS__ || { stems: [], masterUrl: "" };
+      var rowsEl = document.getElementById("rows");
+      var ml = document.getElementById("masterlink");
+      if (ml && prefill.masterUrl) ml.href = prefill.masterUrl; else if (ml) ml.removeAttribute("href");
+
+      (prefill.stems || []).forEach(function (s) {
+        var div = document.createElement("div");
+        div.className = "stem-row";
+        var sel = document.createElement("select");
+        ["include", "skip"].forEach(function (v) {
+          var o = document.createElement("option"); o.value = v; o.textContent = v; sel.appendChild(o);
+        });
+        var label = document.createElement("input");
+        label.value = s.label || s.name || "";
+        label.placeholder = "stem label";
+        div.dataset.name = s.name || "";
+        div.appendChild(sel);
+        div.appendChild(label);
+        rowsEl.appendChild(div);
+      });
+
+      function post(resultObj) {
+        var msg = { method: "close_and_send", params: [JSON.stringify(resultObj)] };
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.live) {
+          window.webkit.messageHandlers.live.postMessage(msg);
+        } else if (window.chrome && window.chrome.webview) {
+          window.chrome.webview.postMessage(msg);
+        }
+      }
+      document.getElementById("skip").addEventListener("click", function () { post({ cancelled: true }); });
+      document.getElementById("save").addEventListener("click", function () {
+        var stems = [];
+        rowsEl.querySelectorAll(".stem-row").forEach(function (row) {
+          var include = row.querySelector("select").value === "include";
+          var label = row.querySelector("input").value.trim();
+          stems.push({ name: row.dataset.name, include: include, label: label || row.dataset.name });
+        });
+        post({ stems: stems });
+      });
+    </script>
+  </body>
+</html>
