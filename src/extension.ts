@@ -409,6 +409,6 @@ function showError(context: ExtensionContext<"1.0.0">, body: string): Promise<vo
 }
 
 /** The ONE consolidated end-of-flow report: lead line + per-step outcomes + the three links. */
-function showReport(context: ExtensionContext<"1.0.0">, report: RegisterReport): Promise<void> {
-  return showDialog(context, finalReportHtml(report), REPORT_H);
+function showReport(context: ExtensionContext<"1.0.0">, report: RegisterReport): Promise<string> {
+  return context.ui.showModalDialog(`data:text/html,${encodeURIComponent(finalReportHtml(report))}`, 360, REPORT_H);
 }

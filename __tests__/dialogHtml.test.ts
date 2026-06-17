@@ -94,6 +94,12 @@ describe("finalReportHtml", () => {
     expect(finalReportHtml({ ...base, spliceLogged: 0 })).not.toContain("splice samples");
     expect(finalReportHtml(base)).not.toContain("splice samples");
   });
+
+  it("renders a send-stems button and labels the recording link for the master upload", () => {
+    const html = finalReportHtml({ action: "registered", title: "X", workId: "w1", recordingId: "r1" });
+    expect(html).toContain("send stems");
+    expect(html).toContain("upload your master");
+  });
 });
 
 describe("pasteKeyHtml", () => {

@@ -199,13 +199,14 @@ export function finalReportHtml(report: RegisterReport): string {
   }
   const links =
     reportLinkRow("view the work", `${BASE_URL}/inspect/works/${report.workId}`, 0) +
-    reportLinkRow("view the recording", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
+    reportLinkRow("view the recording (upload your master here)", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
     reportLinkRow("open your catalog", `${BASE_URL}/inspect`, 2);
   return (
     `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
     `<div style="color:#B87333;margin-bottom:8px">pica — registered</div>` +
     `${escapeHtml(lines.join("\n"))}` +
     `<div style="margin-top:14px">${links}</div>` +
+    `<div style="margin-top:14px"><button onclick="${bridgeSend("'sendStems'")}">send stems →</button></div>` +
     closeButton()
   );
 }
