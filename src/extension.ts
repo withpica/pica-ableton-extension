@@ -4,6 +4,9 @@ import { initialize, type ActivationContext, type ExtensionContext } from "@able
 import interfaceHtml from "../ui/interface.html";
 import creditsHtml from "../ui/credits.html";
 import writersHtml from "../ui/writers.html";
+import audioHtml from "../ui/audio.html";
+import { statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { PicaMcpClient } from "./pica/mcpClient";
 import { readApiKey } from "./pica/keyStore";
 import { readSong, type SongLike } from "./session/read";
@@ -33,11 +36,15 @@ import { fetchPeopleCandidates, candidateNames, resolvePersonId, type PersonCand
 import { detectSpliceSamples, saveSpliceSamples } from "./pica/samples";
 import {
   messageHtml,
+  linkMessageHtml,
   finalReportHtml,
   duplicateChoiceHtml,
+  titlePromptHtml,
   type RegisterReport,
   type StepResult,
 } from "./dialogHtml";
+import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } from "./session/renderTargets";
+import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUpload";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
 import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./pica/ownership";
 
@@ -64,6 +71,17 @@ export function activate(activation: ActivationContext): void {
   // No global scope exists — offer the action by right-clicking a track.
   void context.ui.registerContextMenuAction("AudioTrack", "Register Set in PICA", COMMAND_ID);
   void context.ui.registerContextMenuAction("MidiTrack", "Register Set in PICA", COMMAND_ID);
+
+  // Standalone "Send stems to PICA": resolve an already-registered work by title,
+  // then run the render/upload loop against its master recording.
+  const SEND_STEMS_ID = "pica.sendStems";
+  context.commands.registerCommand(SEND_STEMS_ID, () => {
+    void runSendStemsStandalone(context, hostApiVersion).catch((e) => {
+      void showError(context, e instanceof Error ? e.message : String(e));
+    });
+  });
+  void context.ui.registerContextMenuAction("AudioTrack", "Send stems to PICA", SEND_STEMS_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Send stems to PICA", SEND_STEMS_ID);
 }
 
 async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: string): Promise<void> {
@@ -300,7 +318,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     (e) => ({ state: "error" as const, error: e instanceof Error ? e.message : String(e) }),
   );
 
-  await showReport(context, {
+  const reportAction = await showReport(context, {
     action: "registered",
     title: answer.title!,
     workId: r.workId,
@@ -310,6 +328,163 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     credits,
     writers,
   });
+  if (reportAction === "sendStems" && r.recordingId) {
+    await runSendStems(context, runWithClient, r.workId, r.recordingId).catch(() => undefined);
+  }
+}
+
+const AUDIO_W = 420;
+const AUDIO_H = 480;
+const TITLE_W = 380;
+const TITLE_H = 220;
+const MAX_MB = Math.round(MAX_UPLOAD_BYTES / 1048576);
+
+/**
+ * Stage 3: render the chosen audio tracks pre-fx and upload each as a stem
+ * linked to the work's master recording. Shared by the in-flow hook (after
+ * register) and the standalone "Send stems to PICA" command.
+ */
+async function runSendStems(
+  context: ExtensionContext<"1.0.0">,
+  run: ClientRunner,
+  workId: string,
+  recordingId: string,
+): Promise<void> {
+  const song = context.application.song;
+  const allTracks = (song.tracks ?? []) as unknown as TrackLike[];
+  const audioTracks = allTracks.filter(isAudioTrack);
+  if (audioTracks.length === 0) {
+    await showError(
+      context,
+      "no audio tracks in the arrangement. freeze & flatten the tracks you want to upload (this prints their fx), then try again.",
+    );
+    return;
+  }
+  const songEnd = computeSongEnd(allTracks);
+  if (songEnd <= 0) {
+    await showError(
+      context,
+      "the arrangement is empty. flatten or record your clips into the arrangement, then try again.",
+    );
+    return;
+  }
+  const targets = deriveRenderTargets(audioTracks);
+  const masterUrl = `${BASE_URL}/inspect/recordings/${recordingId}`;
+
+  const injected = audioHtml.replace(
+    "</head>",
+    `<script>window.__PICA_STEMS__ = ${JSON.stringify({
+      stems: targets.map((t, i) => ({ index: i, name: t.name, label: t.label })),
+      masterUrl,
+    }).replace(/</g, "\\u003c")};</script></head>`,
+  );
+  const raw = await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(injected)}`, AUDIO_W, AUDIO_H);
+  // Join back to render targets by stable array index, not by name: Live audio
+  // tracks frequently share a name (default "Audio", common after freeze &
+  // flatten), so a name-keyed map would collapse same-named tracks to one entry
+  // and silently render the same track twice while dropping the other.
+  let answer: { cancelled?: boolean; stems?: Array<{ index: number; include: boolean; label: string }> };
+  try {
+    answer = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (answer.cancelled || !Array.isArray(answer.stems)) return;
+
+  const chosen = answer.stems.filter((s) => s.include);
+  const results: string[] = [];
+
+  await context.ui.withinProgressDialog("uploading stems…", { progress: 0 }, async (update, signal) => {
+    let done = 0;
+    for (const s of chosen) {
+      if (signal.aborted) break;
+      const target = targets[s.index];
+      if (!target) {
+        done++;
+        continue;
+      }
+      const label = (s.label || target.label).trim() || target.name;
+      const pct = Math.round((done / chosen.length) * 100);
+      await update(`rendering ${label}…`, pct);
+      try {
+        // The high-level Resources.renderPreFxAudio takes a typed AudioTrack; our
+        // structural TrackLike is the same live object handed back unchanged from
+        // deriveRenderTargets — cast at this single IO boundary.
+        const wavPath = await context.resources.renderPreFxAudio(target.track as never, 0, songEnd);
+        const size = statSync(wavPath).size;
+        if (exceedsCap(size)) {
+          results.push(`✗ ${label} — too large (${Math.round(size / 1048576)}MB > ${MAX_MB}MB); flatten a shorter range`);
+        } else {
+          await update(`uploading ${label}…`, pct);
+          await run((c) =>
+            uploadRenderedStem(
+              { client: c, fetchFn: fetch, readFile },
+              { wavPath, fileName: `${label}.wav`, fileSize: size, recordingId, workId, stemLabel: label },
+            ),
+          );
+          results.push(`✓ ${label}`);
+        }
+      } catch (e) {
+        results.push(`✗ ${label} — ${e instanceof Error ? e.message : String(e)}`);
+      }
+      done++;
+    }
+  });
+
+  await showLink(
+    context,
+    "pica — stems",
+    results.length ? results.join("\n") : "no stems selected.",
+    `${BASE_URL}/inspect/recordings/${recordingId}`,
+  );
+}
+
+/** Standalone entry: connect (if needed) → ask which work → resolve it → send stems. */
+async function runSendStemsStandalone(context: ExtensionContext<"1.0.0">, hostApiVersion: string): Promise<void> {
+  const storageDir = context.environment.storageDirectory;
+  if (!storageDir) {
+    await showError(context, "No storage directory available — cannot read the PICA key.");
+    return;
+  }
+  let apiKey = await readApiKey(storageDir);
+  if (!apiKey) {
+    apiKey = await connectAndStoreKey(context, storageDir);
+    if (!apiKey) return;
+  }
+  let currentKey = apiKey!;
+  const runWithClient = <T>(fn: (c: PicaMcpClient) => Promise<T>) =>
+    withReconnect(
+      context,
+      storageDir,
+      (key: string) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key })),
+      currentKey,
+      (fresh) => {
+        currentKey = fresh;
+      },
+    );
+  const liveVersion = hostApiVersion ? `(api ${hostApiVersion})` : "";
+
+  const titleRaw = await context.ui.showModalDialog(
+    `data:text/html,${encodeURIComponent(titlePromptHtml())}`,
+    TITLE_W,
+    TITLE_H,
+  );
+  const parsed = safeParse(titleRaw) as { title?: string; cancelled?: boolean };
+  const title = parsed.title?.trim();
+  if (parsed.cancelled || !title) return;
+
+  const found = await runWithClient(async (c) => {
+    await ensureIntroduced(c, liveVersion);
+    return findExistingRegistration(c, title);
+  });
+  if (!found?.recordingId) {
+    await showError(
+      context,
+      `no registered work titled "${title}" found. register the Set in PICA first, then send stems.`,
+    );
+    return;
+  }
+  await runSendStems(context, runWithClient, found.workId, found.recordingId);
 }
 
 const CREDITS_W = 430;
@@ -408,7 +583,12 @@ function showError(context: ExtensionContext<"1.0.0">, body: string): Promise<vo
   return showDialog(context, messageHtml("pica — error", body), 200);
 }
 
+/** Info dialog carrying a PICA link (clickable anchor + copy + selectable text). */
+function showLink(context: ExtensionContext<"1.0.0">, title: string, body: string, url: string): Promise<void> {
+  return showDialog(context, linkMessageHtml(title, body, url), 320);
+}
+
 /** The ONE consolidated end-of-flow report: lead line + per-step outcomes + the three links. */
-function showReport(context: ExtensionContext<"1.0.0">, report: RegisterReport): Promise<void> {
-  return showDialog(context, finalReportHtml(report), REPORT_H);
+function showReport(context: ExtensionContext<"1.0.0">, report: RegisterReport): Promise<string> {
+  return context.ui.showModalDialog(`data:text/html,${encodeURIComponent(finalReportHtml(report))}`, 360, REPORT_H);
 }

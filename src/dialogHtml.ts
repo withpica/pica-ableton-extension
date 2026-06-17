@@ -94,6 +94,21 @@ export function pasteKeyHtml(): string {
   );
 }
 
+/** One-input prompt: ask for a work title; bridges {title} or {cancelled:true}. */
+export function titlePromptHtml(): string {
+  const confirmJs = bridgeSend("JSON.stringify({title:document.getElementById('t').value.trim()})");
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  return (
+    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<div style="color:#B87333;margin-bottom:8px">pica — which work?</div>` +
+    `type the title of the registered work these stems belong to:` +
+    `<div style="margin-top:10px"><input id="t" placeholder="work title" ` +
+    `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></div>` +
+    `<div style="margin-top:12px"><button onclick="${escapeHtml(confirmJs)}">find</button> ` +
+    `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
+  );
+}
+
 /** Duplicate-title choice dialog: add to existing, register a new version
  *  (with a type picker), or cancel. Bridges {action, versionType?}. */
 export function duplicateChoiceHtml(title: string, versionTypes: readonly string[]): string {
@@ -199,13 +214,14 @@ export function finalReportHtml(report: RegisterReport): string {
   }
   const links =
     reportLinkRow("view the work", `${BASE_URL}/inspect/works/${report.workId}`, 0) +
-    reportLinkRow("view the recording", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
+    reportLinkRow("view the recording (upload your master here)", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
     reportLinkRow("open your catalog", `${BASE_URL}/inspect`, 2);
   return (
     `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
     `<div style="color:#B87333;margin-bottom:8px">pica — registered</div>` +
     `${escapeHtml(lines.join("\n"))}` +
     `<div style="margin-top:14px">${links}</div>` +
+    `<div style="margin-top:14px"><button onclick="${bridgeSend("'sendStems'")}">send stems →</button></div>` +
     closeButton()
   );
 }
