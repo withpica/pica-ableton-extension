@@ -29,112 +29,91 @@ describe("ensureIntroduced", () => {
 });
 
 describe("registerSet", () => {
-  it("dup-checks, creates work, then master recording, and returns ids + inspect url", async () => {
+  it("registers the set in ONE pica_register_set call and returns ids + inspect url", async () => {
     const c = fakeClient();
-    c.callTool
-      .mockResolvedValueOnce([]) // pica_works_query → real client returns the unwrapped array
-      .mockResolvedValueOnce({ id: "w1", completeness_score: 12 }) // works_create
-      .mockResolvedValueOnce({ id: "r1" }) // recordings_create
-      .mockResolvedValueOnce([]) // splits_list → none
-      .mockResolvedValueOnce({ id: "s1" }); // splits_create
+    c.callTool.mockResolvedValueOnce({
+      work_id: "w1",
+      recording_id: "r1",
+      completeness_score: 12,
+      master_ownership: "created",
+    });
 
     const out = await registerSet(c, input);
 
-    expect(c.callTool).toHaveBeenNthCalledWith(1, "pica_works_query", { query: "Night Drive" });
-    expect(c.callTool).toHaveBeenNthCalledWith(2, "pica_works_create", expect.objectContaining({
-      title: "Night Drive", work_type: "song", key: "C Minor", metadata: input.metadata, notes: input.summary,
-    }));
-    expect(c.callTool).toHaveBeenNthCalledWith(3, "pica_recordings_create", expect.objectContaining({
-      title: "Night Drive", artist_name: "Dinachi", version_type: "master", work_id: "w1",
-    }));
-    expect(c.callTool).toHaveBeenNthCalledWith(4, "pica_recording_splits_list", { recording_id: "r1" });
-    expect(c.callTool).toHaveBeenNthCalledWith(5, "pica_recording_splits_create", {
-      recording_id: "r1", split_type: "master", percentage: 100, role: "owner",
+    expect(c.callTool).toHaveBeenCalledTimes(1);
+    expect(c.callTool).toHaveBeenCalledWith("pica_register_set", {
+      title: "Night Drive",
+      artist_name: "Dinachi",
+      work_type: "song",
+      key: "C Minor",
+      notes: input.summary,
+      metadata: input.metadata,
     });
     expect(out).toEqual({
-      workId: "w1", recordingId: "r1", completenessScore: 12,
+      workId: "w1",
+      recordingId: "r1",
+      completenessScore: 12,
       inspectUrl: "https://withpica.com/inspect/works/w1",
       masterOwnership: "created",
     });
   });
 
-  it("skips the master split when the recording already has one (re-register)", async () => {
+  it("surfaces master_ownership 'failed' from the server (best-effort ownership)", async () => {
     const c = fakeClient();
-    c.callTool
-      .mockResolvedValueOnce([]) // works_query
-      .mockResolvedValueOnce({ id: "w1" }) // works_create
-      .mockResolvedValueOnce({ id: "r1" }) // recordings_create
-      .mockResolvedValueOnce([{ split_type: "master" }]); // splits_list → already owned
+    c.callTool.mockResolvedValueOnce({
+      work_id: "w1",
+      recording_id: "r1",
+      master_ownership: "failed",
+    });
     const out = await registerSet(c, input);
-    expect(out.masterOwnership).toBe("skipped_existing");
-    expect(c.callTool).toHaveBeenCalledTimes(4); // no splits_create
+    expect(out.masterOwnership).toBe("failed");
   });
 
-  // Real prod shape captured 2026-06-12: pica_works_query returns {count, items, ...}.
-  it("throws DuplicateWorkError when query returns the real {items} payload with a same-title work", async () => {
+  it("maps a duplicate error (existing_work_id under details) into DuplicateWorkError", async () => {
     const c = fakeClient();
-    c.callTool.mockResolvedValueOnce({ count: 1, items: [{ id: "w9", title: "Night Drive" }], total: 1 });
-    await expect(registerSet(c, input)).rejects.toBeInstanceOf(DuplicateWorkError);
+    c.callTool.mockRejectedValueOnce(
+      new PicaMcpError("dup", "WORK_ALREADY_EXISTS", { details: { existing_work_id: "w7" } }),
+    );
+    await expect(registerSet(c, input)).rejects.toMatchObject({
+      name: "DuplicateWorkError",
+      existingWorkId: "w7",
+    });
     expect(c.callTool).toHaveBeenCalledTimes(1);
   });
 
-  // Regression: 2026-06-12 smoke test — a parsing miss made work.id undefined; the
-  // undefined work_id was silently dropped by JSON.stringify → orphaned recording.
-  it("aborts before creating a recording if works_create returns no id", async () => {
+  it("maps a duplicate error (flat existing_work_id fallback) into DuplicateWorkError", async () => {
     const c = fakeClient();
-    c.callTool
-      .mockResolvedValueOnce({ count: 0, items: [] }) // works_query
-      .mockResolvedValueOnce({ message: "Work created successfully" }); // works_create with no id
-    await expect(registerSet(c, input)).rejects.toThrow(/work id/i);
-    expect(c.callTool).toHaveBeenCalledTimes(2); // recordings_create never called
+    c.callTool.mockRejectedValueOnce(
+      new PicaMcpError("dup", "WORK_ALREADY_EXISTS", { existing_work_id: "w8" }),
+    );
+    await expect(registerSet(c, input)).rejects.toMatchObject({
+      name: "DuplicateWorkError",
+      existingWorkId: "w8",
+    });
   });
 
-  it("throws DuplicateWorkError when query finds a same-title work", async () => {
+  it("rethrows a duplicate error that carries no existing_work_id (not a DuplicateWorkError)", async () => {
     const c = fakeClient();
-    c.callTool.mockResolvedValueOnce([{ id: "w9", title: "night drive" }]); // works_query returns array directly
-    await expect(registerSet(c, input)).rejects.toBeInstanceOf(DuplicateWorkError);
-    expect(c.callTool).toHaveBeenCalledTimes(1); // never reaches create
+    c.callTool.mockRejectedValueOnce(new PicaMcpError("dup", "WORK_ALREADY_EXISTS", {}));
+    await expect(registerSet(c, input)).rejects.toMatchObject({ name: "PicaMcpError" });
   });
 
-  it("maps a 409 WORK_ALREADY_EXISTS from create into DuplicateWorkError", async () => {
+  it("propagates a non-duplicate failure (never reports success on a failed write)", async () => {
     const c = fakeClient();
-    c.callTool
-      .mockResolvedValueOnce([]) // pica_works_query → real client returns the unwrapped array
-      .mockRejectedValueOnce(new PicaMcpError("dup", "WORK_ALREADY_EXISTS", { existing_work_id: "w7" }));
-    await expect(registerSet(c, input)).rejects.toMatchObject({ name: "DuplicateWorkError", existingWorkId: "w7" });
-  });
-
-  it("propagates a recording-create failure (never reports success on a failed write)", async () => {
-    const c = fakeClient();
-    c.callTool
-      .mockResolvedValueOnce([]) // pica_works_query → real client returns the unwrapped array
-      .mockResolvedValueOnce({ id: "w1" })
-      .mockRejectedValueOnce(new PicaMcpError("boom", "500"));
+    c.callTool.mockRejectedValueOnce(new PicaMcpError("boom", "500"));
     await expect(registerSet(c, input)).rejects.toBeInstanceOf(PicaMcpError);
+  });
+
+  it("aborts if the server returns no work + recording ids", async () => {
+    const c = fakeClient();
+    c.callTool.mockResolvedValueOnce({ message: "registered" }); // missing ids
+    await expect(registerSet(c, input)).rejects.toThrow(/work \+ recording ids/i);
   });
 
   it("rejects a blank title without calling any tool", async () => {
     const c = fakeClient();
     await expect(registerSet(c, { ...input, title: "   " })).rejects.toThrow(/blank/i);
     expect(c.callTool).not.toHaveBeenCalled();
-  });
-
-  it("rethrows a WORK_ALREADY_EXISTS error that carries no existing_work_id (not a DuplicateWorkError)", async () => {
-    const c = fakeClient();
-    c.callTool
-      .mockResolvedValueOnce([]) // pica_works_query → real client returns the unwrapped array
-      .mockRejectedValueOnce(new PicaMcpError("dup", "WORK_ALREADY_EXISTS", {}));
-    await expect(registerSet(c, input)).rejects.toMatchObject({ name: "PicaMcpError" });
-  });
-
-  it("propagates a 401 from ownership capture so the reconnect path re-runs", async () => {
-    const c = fakeClient();
-    c.callTool
-      .mockResolvedValueOnce([]) // works_query
-      .mockResolvedValueOnce({ id: "w1" }) // works_create
-      .mockResolvedValueOnce({ id: "r1" }) // recordings_create
-      .mockRejectedValueOnce(new PicaMcpError("Unauthorized", "401")); // splits_list → 401
-    await expect(registerSet(c, input)).rejects.toBeInstanceOf(PicaMcpError);
   });
 });
 
@@ -247,21 +226,29 @@ describe("primary_artist_id linking", () => {
     expect(calls[0]!.args.primary_artist_id).toBeUndefined();
   });
 
-  it("registerSet threads primaryArtistId into the master recording create", async () => {
+  it("registerSet threads primaryArtistId into the single pica_register_set call", async () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const client = {
       callTool: async (name: string, args: Record<string, unknown>) => {
         calls.push({ name, args });
-        if (name === "pica_works_query") return [];
-        if (name === "pica_works_create") return { id: "w1" };
-        if (name === "pica_recordings_create") return { id: "r1" };
-        if (name === "pica_recording_splits_list") return [];
-        if (name === "pica_recording_splits_create") return { id: "s1" };
-        return {};
+        return { work_id: "w1", recording_id: "r1", master_ownership: "created" };
       },
     } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
     await registerSet(client, { ...input, primaryArtistId: "p9" });
-    const recCreate = calls.find((c) => c.name === "pica_recordings_create");
-    expect(recCreate!.args.primary_artist_id).toBe("p9");
+    const reg = calls.find((c) => c.name === "pica_register_set");
+    expect(reg!.args.primary_artist_id).toBe("p9");
+  });
+
+  it("registerSet omits primary_artist_id from pica_register_set when not provided", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const client = {
+      callTool: async (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        return { work_id: "w1", recording_id: "r1", master_ownership: "created" };
+      },
+    } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
+    await registerSet(client, input);
+    const reg = calls.find((c) => c.name === "pica_register_set");
+    expect(reg!.args.primary_artist_id).toBeUndefined();
   });
 });

@@ -1,7 +1,7 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
 import { PicaMcpClient, PicaMcpError } from "./mcpClient";
-import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./ownership";
+import { type MasterOwnershipOutcome } from "./ownership";
 
 export interface RegisterInput {
   title: string;
@@ -87,76 +87,74 @@ function asArray(queryResult: unknown): Array<{ id: string; title: string }> {
   return Array.isArray(list) ? (list as Array<{ id: string; title: string }>) : [];
 }
 
-/** Register the captured Set: dup-check → create work (with snapshot) → create master recording. */
+/** Pull the existing work id out of a pica_register_set duplicate error. The
+ *  server nests it under `details` (the MCP error formatter only forwards
+ *  error/message/details), with a flat fallback for direct callers. */
+function existingWorkIdFromError(e: PicaMcpError): string | undefined {
+  const data = e.data as
+    | { existing_work_id?: string; details?: { existing_work_id?: string } }
+    | undefined;
+  return data?.details?.existing_work_id ?? data?.existing_work_id;
+}
+
+/**
+ * Register the captured Set in ONE round-trip via pica_register_set: the server
+ * creates the work (with snapshot), the linked master recording, and 100% org
+ * master ownership in a single in-process operation. This replaces the five
+ * sequential calls the extension used to make (works_query dup-check →
+ * works_create → recordings_create → splits_list → splits_create) — the bulk of
+ * the "Registering…" latency was those serialized internet round-trips.
+ *
+ * The server's own title+artist dedup gate is the duplicate backstop (the
+ * client-side pre-query is gone): a duplicate surfaces as a PicaMcpError whose
+ * details carry existing_work_id, which we convert to DuplicateWorkError so the
+ * caller can offer add-version / complete.
+ */
 export async function registerSet(client: PicaMcpClient, input: RegisterInput): Promise<RegisterResult> {
   if (!input.title.trim()) {
     throw new Error("Cannot register: the work title is blank.");
   }
 
-  // 1. Duplicate check by title (weak, but cheap; the server 409 is the backstop).
-  const queryResult = await client.callTool("pica_works_query", { query: input.title });
-  const wanted = input.title.trim().toLowerCase();
-  const dup = asArray(queryResult).find(
-    (w) => Boolean(w.id) && (w.title ?? "").trim().toLowerCase() === wanted,
-  );
-  if (dup) throw new DuplicateWorkError(dup.id, input.title);
-
-  // 2. Create the work, carrying the captured snapshot.
-  let work: { id: string; completeness_score?: number };
+  let res: {
+    work_id?: string;
+    recording_id?: string;
+    completeness_score?: number;
+    master_ownership?: MasterOwnershipOutcome["status"];
+  };
   try {
-    work = await client.callTool<{ id: string; completeness_score?: number }>("pica_works_create", {
+    res = await client.callTool("pica_register_set", {
       title: input.title,
+      artist_name: input.artistName,
       work_type: input.workType,
       key: input.key,
       notes: input.summary,
       metadata: input.metadata,
+      ...(input.primaryArtistId ? { primary_artist_id: input.primaryArtistId } : {}),
     });
   } catch (e) {
     if (e instanceof PicaMcpError) {
-      const existing = (e.data as { existing_work_id?: string } | undefined)?.existing_work_id;
+      const existing = existingWorkIdFromError(e);
       if (existing) {
         throw new DuplicateWorkError(existing, input.title);
       }
-      // WORK_ALREADY_EXISTS without a usable id: fall through and surface the raw error.
+      // A duplicate without a usable id (or any other failure): surface raw.
     }
     throw e;
   }
 
-  // Never proceed without an id: an undefined work_id is silently dropped by
-  // JSON.stringify and would create an unlinked (orphan) recording.
-  if (!work?.id) {
+  // Never proceed without ids: the server returns both on success.
+  if (!res?.work_id || !res?.recording_id) {
     throw new Error(
-      "PICA created the work but did not return a work id — aborting before creating an unlinked recording.",
+      "PICA registered the set but did not return work + recording ids.",
     );
   }
-
-  // 3. Create the master recording linked to the work.
-  const { recordingId } = await createRecordingForWork(client, {
-    workId: work.id,
-    title: input.title,
-    artistName: input.artistName,
-    versionType: "master",
-    primaryArtistId: input.primaryArtistId,
-  });
-
-  // Never proceed without an id: an undefined recording_id would silently corrupt
-  // the ownership write (JSON.stringify drops undefined values).
-  if (!recordingId) {
-    throw new Error(
-      "PICA created the recording but returned no id — aborting before ownership capture.",
-    );
-  }
-
-  // 4. Capture master ownership (100% to the registering org). Insert-once; a 401
-  // propagates so the reconnect path re-runs, any other failure is reported not thrown.
-  const ownership = await ensureMasterOwnership(client, recordingId);
 
   return {
-    workId: work.id,
-    recordingId,
-    completenessScore: work.completeness_score,
-    inspectUrl: `https://withpica.com/inspect/works/${work.id}`,
-    masterOwnership: ownership.status,
+    workId: res.work_id,
+    recordingId: res.recording_id,
+    completenessScore: res.completeness_score,
+    inspectUrl: `https://withpica.com/inspect/works/${res.work_id}`,
+    masterOwnership: res.master_ownership,
   };
 }
 
