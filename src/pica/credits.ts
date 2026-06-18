@@ -186,11 +186,26 @@ export async function loadExistingCredits(
   return Array.isArray(list) ? (list as ExistingCredit[]) : [];
 }
 
+/** Per-row outcome from pica_recording_credits_bulk_update (subset we read). */
+interface BulkCreditRow {
+  credited_name: string;
+  role: string;
+  status: "created" | "skipped_existing" | "would_create" | "would_skip_existing";
+}
+interface BulkCreditsResult {
+  results?: BulkCreditRow[];
+}
+
 /**
- * Per-row writes (spec decision 7): one pica_recording_credits_update call
- * per merged person; the server resolves credited_name → person_id (ADR-255
- * resolve-on-write). Rows already saved (same name + role) are skipped — the
- * MCP tool only inserts, and the DB unique key would reject a duplicate.
+ * One bulk write (latency slice, 2026-06-18): all merged performer credits go to
+ * the recording in a SINGLE pica_recording_credits_bulk_update call rather than
+ * one pica_recording_credits_update per person. Each MCP call carries ~1.4-2.0s
+ * of fixed /api/mcp overhead (measured), so an N-performer Set used to pay
+ * N x that; this collapses it to one. The server resolves credited_name ->
+ * person_id (ADR-255 resolve-on-write) and dedups on (recording, credited_name,
+ * role), returning per-row created / skipped_existing. We pre-skip rows already
+ * in `existing` (so they're not re-sent) and infer linked-vs-draft from whether
+ * we sent a person_id — the bulk result carries no per-row person_id.
  */
 export async function saveCredits(
   client: PicaMcpClient,
@@ -200,52 +215,70 @@ export async function saveCredits(
   candidates: PersonCandidate[] = [],
 ): Promise<CreditOutcome[]> {
   const merged = mergeRowsByPerson(rows);
+  if (merged.length === 0) return [];
+
   const existingKey = new Set(
     existing.map((e) => `${norm(e.credited_name)}|${e.role}`),
   );
+  const isExisting = (name: string): boolean =>
+    existingKey.has(`${norm(name)}|${ROLE}`);
+  const personIdByName = new Map(
+    merged.map((m) => [
+      norm(m.performerName),
+      resolvePersonId(m.performerName, candidates),
+    ]),
+  );
 
-  const outcomes: CreditOutcome[] = [];
-  for (const m of merged) {
-    if (existingKey.has(`${norm(m.performerName)}|${ROLE}`)) {
-      outcomes.push({
-        creditedName: m.performerName,
-        instrument: m.instrument,
-        status: "skipped_existing",
-      });
-      continue;
-    }
+  const toSend = merged.filter((m) => !isExisting(m.performerName));
+
+  let failed: string | null = null;
+  const statusByName = new Map<string, BulkCreditRow["status"]>();
+  if (toSend.length > 0) {
     try {
-      const personId = resolvePersonId(m.performerName, candidates);
-      const created = await client.callTool<{ person_id?: string | null }>(
-        "pica_recording_credits_update",
+      const res = await client.callTool<BulkCreditsResult>(
+        "pica_recording_credits_bulk_update",
         {
-          recording_id: recordingId,
-          credited_name: m.performerName,
-          role: ROLE,
-          instrument: m.instrument,
-          ...(personId ? { person_id: personId } : {}),
+          recording_ids: [recordingId],
+          credits: toSend.map((m) => {
+            const personId = personIdByName.get(norm(m.performerName));
+            return {
+              credited_name: m.performerName,
+              role: ROLE,
+              instrument: m.instrument,
+              ...(personId ? { person_id: personId } : {}),
+            };
+          }),
         },
       );
-      outcomes.push({
-        creditedName: m.performerName,
-        instrument: m.instrument,
-        status: created?.person_id ? "saved_linked" : "saved_draft",
-      });
+      for (const r of res?.results ?? []) {
+        statusByName.set(norm(r.credited_name), r.status);
+      }
     } catch (e) {
-      // A 401 must reach withReconnect so it can mint a fresh key and re-run
-      // the whole list. Rethrow (aborting the loop) rather than recording a
-      // failed outcome that would swallow the auth signal. Safe to re-run:
-      // credit writes are insert-only and de-duplicated (the skipped_existing
-      // check + the DB UNIQUE (recording_id, credited_name, role) constraint),
-      // so already-written rows are skipped on the retry — no double-write.
+      // One call now. A 401 still reaches withReconnect (mint a fresh key and
+      // re-run); re-run is safe (insert-only + dedup on
+      // (recording, credited_name, role)). Any other error means the
+      // all-or-nothing bulk route wrote nothing, so the whole sent batch failed.
       if (e instanceof PicaMcpError && e.code === "401") throw e;
-      outcomes.push({
-        creditedName: m.performerName,
-        instrument: m.instrument,
-        status: "failed",
-        error: e instanceof Error ? e.message : String(e),
-      });
+      failed = e instanceof Error ? e.message : String(e);
     }
   }
-  return outcomes;
+
+  return merged.map((m): CreditOutcome => {
+    const k = norm(m.performerName);
+    if (isExisting(m.performerName)) {
+      return { creditedName: m.performerName, instrument: m.instrument, status: "skipped_existing" };
+    }
+    if (failed) {
+      return { creditedName: m.performerName, instrument: m.instrument, status: "failed", error: failed };
+    }
+    if (statusByName.get(k) === "skipped_existing") {
+      return { creditedName: m.performerName, instrument: m.instrument, status: "skipped_existing" };
+    }
+    // created (or, defensively, no per-row echo) -> linked iff we sent a person_id
+    return {
+      creditedName: m.performerName,
+      instrument: m.instrument,
+      status: personIdByName.get(k) ? "saved_linked" : "saved_draft",
+    };
+  });
 }

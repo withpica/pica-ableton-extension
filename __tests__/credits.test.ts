@@ -194,117 +194,159 @@ describe("loadExistingCredits", () => {
   });
 });
 
-describe("saveCredits", () => {
+describe("saveCredits (one bulk call)", () => {
   const rows: CreditRow[] = [
     { instrument: "drums", performerName: "Dave Smith" },
     { instrument: "keys", performerName: "Maria" },
   ];
 
-  it("writes one Performer credit per person and reports linked vs draft", async () => {
+  type BulkRow = {
+    recording_id: string;
+    credited_name: string;
+    role: string;
+    status: "created" | "skipped_existing";
+    credit_id?: string;
+  };
+  const bulkResult = (results: BulkRow[]) => ({
+    dry_run: false,
+    target_recording_count: 1,
+    total_rows: results.length,
+    created: results.filter((r) => r.status === "created").length,
+    skipped_existing: results.filter((r) => r.status === "skipped_existing").length,
+    would_create: 0,
+    would_skip_existing: 0,
+    results,
+  });
+  const row = (
+    credited_name: string,
+    status: BulkRow["status"] = "created",
+  ): BulkRow => ({ recording_id: "rec-1", credited_name, role: "Performer", status });
+
+  it("issues ONE pica_recording_credits_bulk_update call for all merged people", async () => {
     const c = fakeClient();
-    c.callTool
-      .mockResolvedValueOnce({ id: "rc-1", person_id: "p-9" }) // Dave → linked
-      .mockResolvedValueOnce({ id: "rc-2", person_id: null }); // Maria → draft
+    c.callTool.mockResolvedValueOnce(bulkResult([row("Dave Smith"), row("Maria")]));
 
     const outcomes = await saveCredits(c, "rec-1", rows, []);
 
-    expect(c.callTool).toHaveBeenNthCalledWith(1, "pica_recording_credits_update", {
-      recording_id: "rec-1",
-      credited_name: "Dave Smith",
-      role: "Performer",
-      instrument: "drums",
+    expect(c.callTool).toHaveBeenCalledTimes(1);
+    expect(c.callTool).toHaveBeenCalledWith("pica_recording_credits_bulk_update", {
+      recording_ids: ["rec-1"],
+      credits: [
+        { credited_name: "Dave Smith", role: "Performer", instrument: "drums" },
+        { credited_name: "Maria", role: "Performer", instrument: "keys" },
+      ],
     });
+    // no person_id sent → both draft
     expect(outcomes).toEqual([
-      { creditedName: "Dave Smith", instrument: "drums", status: "saved_linked" },
+      { creditedName: "Dave Smith", instrument: "drums", status: "saved_draft" },
       { creditedName: "Maria", instrument: "keys", status: "saved_draft" },
     ]);
   });
 
-  it("skips rows whose name+role already exist (re-run safety) without calling the tool", async () => {
+  it("labels saved_linked for a row whose person_id we sent", async () => {
     const c = fakeClient();
-    c.callTool.mockResolvedValueOnce({ id: "rc-2", person_id: null });
-    const existing: ExistingCredit[] = [
-      { id: "c1", credited_name: "dave smith", role: "Performer", instrument: "drums" },
-    ];
+    c.callTool.mockResolvedValueOnce(bulkResult([row("Elle")]));
+    const cands = [{ id: "p1", name: "Elle Limebear", stageNames: ["Elle"] }];
 
-    const outcomes = await saveCredits(c, "rec-1", rows, existing);
-
-    expect(c.callTool).toHaveBeenCalledTimes(1); // only Maria
-    expect(outcomes[0]).toMatchObject({
-      creditedName: "Dave Smith",
-      status: "skipped_existing",
-    });
-  });
-
-  it("reports a failed row and continues with the rest", async () => {
-    const c = fakeClient();
-    c.callTool
-      .mockRejectedValueOnce(new Error("boom"))
-      .mockResolvedValueOnce({ id: "rc-2", person_id: null });
-
-    const outcomes = await saveCredits(c, "rec-1", rows, []);
-
-    expect(outcomes[0]).toMatchObject({ status: "failed", error: "boom" });
-    expect(outcomes[1]).toMatchObject({ status: "saved_draft" });
-  });
-
-  it("rethrows a 401 PicaMcpError (so withReconnect can reconnect) instead of recording a failed outcome", async () => {
-    const c = fakeClient();
-    c.callTool.mockRejectedValueOnce(new PicaMcpError("unauthorised", "401"));
-
-    await expect(saveCredits(c, "rec-1", rows, [])).rejects.toBeInstanceOf(
-      PicaMcpError,
-    );
-    // aborted on the first row — the second row never ran
-    expect(c.callTool).toHaveBeenCalledTimes(1);
-  });
-
-  it("records a failed outcome (does NOT rethrow) for a non-401 PicaMcpError", async () => {
-    const c = fakeClient();
-    c.callTool
-      .mockRejectedValueOnce(new PicaMcpError("server error", "500"))
-      .mockResolvedValueOnce({ id: "rc-2", person_id: null });
-
-    const outcomes = await saveCredits(c, "rec-1", rows, []);
-
-    expect(outcomes[0]).toMatchObject({ status: "failed", error: "server error" });
-    expect(outcomes[1]).toMatchObject({ status: "saved_draft" });
-  });
-});
-
-describe("saveCredits person_id linking", () => {
-  function fakeClient(calls: Array<Record<string, unknown>>) {
-    return {
-      callTool: async (_name: string, args: Record<string, unknown>) => {
-        calls.push(args);
-        return { person_id: args.person_id ?? null };
-      },
-    } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
-  }
-  const cands = [
-    { id: "p1", name: "Elle Limebear", stageNames: ["Elle"] },
-    { id: "p2", name: "Sam", stageNames: [] },
-    { id: "p3", name: "Sam", stageNames: [] },
-  ];
-
-  it("sends person_id when the typed name uniquely matches an existing person", async () => {
-    const calls: Array<Record<string, unknown>> = [];
     const out = await saveCredits(
-      fakeClient(calls),
-      "rec1",
+      c,
+      "rec-1",
       [{ instrument: "guitar", performerName: "Elle" }],
       [],
       cands,
     );
-    expect(calls[0]!.person_id).toBe("p1");
-    expect(out[0]!.status).toBe("saved_linked");
+
+    expect(c.callTool).toHaveBeenCalledWith("pica_recording_credits_bulk_update", {
+      recording_ids: ["rec-1"],
+      credits: [
+        { credited_name: "Elle", role: "Performer", instrument: "guitar", person_id: "p1" },
+      ],
+    });
+    expect(out[0]).toMatchObject({ status: "saved_linked" });
   });
 
-  it("omits person_id for a new name (free text) and for ambiguous matches", async () => {
-    const calls: Array<Record<string, unknown>> = [];
+  it("maps a server-reported skipped_existing row to skipped_existing", async () => {
+    const c = fakeClient();
+    c.callTool.mockResolvedValueOnce(
+      bulkResult([row("Dave Smith", "skipped_existing"), row("Maria")]),
+    );
+
+    const out = await saveCredits(c, "rec-1", rows, []);
+
+    expect(out[0]).toMatchObject({ status: "skipped_existing" });
+    expect(out[1]).toMatchObject({ status: "saved_draft" });
+  });
+
+  it("pre-skips rows already in `existing` and sends only the rest, preserving order", async () => {
+    const c = fakeClient();
+    c.callTool.mockResolvedValueOnce(bulkResult([row("Maria")]));
+    const existing: ExistingCredit[] = [
+      { id: "c1", credited_name: "dave smith", role: "Performer", instrument: "drums" },
+    ];
+
+    const out = await saveCredits(c, "rec-1", rows, existing);
+
+    expect(c.callTool).toHaveBeenCalledWith("pica_recording_credits_bulk_update", {
+      recording_ids: ["rec-1"],
+      credits: [{ credited_name: "Maria", role: "Performer", instrument: "keys" }],
+    });
+    expect(out).toEqual([
+      { creditedName: "Dave Smith", instrument: "drums", status: "skipped_existing" },
+      { creditedName: "Maria", instrument: "keys", status: "saved_draft" },
+    ]);
+  });
+
+  it("makes no call and returns [] when there are no named rows", async () => {
+    const c = fakeClient();
+    const out = await saveCredits(c, "rec-1", [{ instrument: "drums", performerName: "" }], []);
+    expect(c.callTool).not.toHaveBeenCalled();
+    expect(out).toEqual([]);
+  });
+
+  it("makes no call when every merged row already exists", async () => {
+    const c = fakeClient();
+    const existing: ExistingCredit[] = [
+      { id: "c1", credited_name: "dave smith", role: "Performer" },
+      { id: "c2", credited_name: "maria", role: "Performer" },
+    ];
+    const out = await saveCredits(c, "rec-1", rows, existing);
+    expect(c.callTool).not.toHaveBeenCalled();
+    expect(out).toEqual([
+      { creditedName: "Dave Smith", instrument: "drums", status: "skipped_existing" },
+      { creditedName: "Maria", instrument: "keys", status: "skipped_existing" },
+    ]);
+  });
+
+  it("rethrows a 401 PicaMcpError (so withReconnect can reconnect)", async () => {
+    const c = fakeClient();
+    c.callTool.mockRejectedValueOnce(new PicaMcpError("unauthorised", "401"));
+    await expect(saveCredits(c, "rec-1", rows, [])).rejects.toBeInstanceOf(PicaMcpError);
+  });
+
+  it("marks the whole batch failed on a non-401 error (route is all-or-nothing)", async () => {
+    const c = fakeClient();
+    c.callTool.mockRejectedValueOnce(new PicaMcpError("server error", "500"));
+
+    const out = await saveCredits(c, "rec-1", rows, []);
+
+    expect(out).toEqual([
+      { creditedName: "Dave Smith", instrument: "drums", status: "failed", error: "server error" },
+      { creditedName: "Maria", instrument: "keys", status: "failed", error: "server error" },
+    ]);
+  });
+
+  it("omits person_id for new (free-text) and ambiguous names", async () => {
+    const c = fakeClient();
+    c.callTool.mockResolvedValueOnce(bulkResult([row("Brand New Person"), row("Sam")]));
+    const cands = [
+      { id: "p1", name: "Elle Limebear", stageNames: ["Elle"] },
+      { id: "p2", name: "Sam", stageNames: [] },
+      { id: "p3", name: "Sam", stageNames: [] }, // ambiguous → no link
+    ];
+
     await saveCredits(
-      fakeClient(calls),
-      "rec1",
+      c,
+      "rec-1",
       [
         { instrument: "keys", performerName: "Brand New Person" },
         { instrument: "bass", performerName: "Sam" },
@@ -312,14 +354,10 @@ describe("saveCredits person_id linking", () => {
       [],
       cands,
     );
-    expect(calls[0]!.person_id).toBeUndefined();
-    expect(calls[1]!.person_id).toBeUndefined();
-  });
 
-  it("works with no candidates (back-compat default)", async () => {
-    const calls: Array<Record<string, unknown>> = [];
-    await saveCredits(fakeClient(calls), "rec1", [{ instrument: "x", performerName: "Y" }], []);
-    expect(calls[0]!.person_id).toBeUndefined();
+    const sent = c.callTool.mock.calls[0]![1] as { credits: Array<Record<string, unknown>> };
+    expect(sent.credits[0]!.person_id).toBeUndefined();
+    expect(sent.credits[1]!.person_id).toBeUndefined();
   });
 });
 
