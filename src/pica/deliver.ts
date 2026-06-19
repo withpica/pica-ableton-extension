@@ -50,12 +50,14 @@ export async function deliverWork(deps: DeliverDeps, args: DeliverArgs): Promise
   try {
     r = await deps.client.callTool("pica_share_send", payload);
   } catch (e) {
-    const err = e as PicaMcpError;
-    if (err?.code === FIRST_EXTERNAL) return { state: "needs_confirm", email };
-    return { state: "error", message: err?.message ?? String(e), code: err?.code };
+    if (e instanceof PicaMcpError) {
+      if (e.code === FIRST_EXTERNAL) return { state: "needs_confirm", email };
+      return { state: "error", message: e.message, code: e.code };
+    }
+    return { state: "error", message: String(e) };
   }
 
-  if (r && typeof r === "object" && (r.error_code || r.error)) {
+  if (r && typeof r === "object" && r.error_code) {
     if (r.error_code === FIRST_EXTERNAL) return { state: "needs_confirm", email };
     return { state: "error", message: r.error || r.suggestion || "delivery failed", code: r.error_code };
   }
