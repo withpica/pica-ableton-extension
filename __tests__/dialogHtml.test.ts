@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escapeHtml, messageHtml, linkMessageHtml, finalReportHtml, type RegisterReport, pasteKeyHtml, duplicateChoiceHtml, titlePromptHtml } from "../src/dialogHtml";
+import { escapeHtml, messageHtml, linkMessageHtml, finalReportHtml, type RegisterReport, pasteKeyHtml, duplicateChoiceHtml, titlePromptHtml, deliverHtml, deliverConfirmHtml } from "../src/dialogHtml";
 
 describe("escapeHtml", () => {
   it("escapes &, <, > and quotes", () => {
@@ -142,5 +142,44 @@ describe("titlePromptHtml", () => {
   it("renders a single title input and the prompt heading", () => {
     expect(titlePromptHtml()).toContain('id="t"');
     expect(titlePromptHtml()).toContain("which work?");
+  });
+});
+
+describe("deliverHtml", () => {
+  it("has email/note/allow-download controls and a send button bridging the payload", () => {
+    const html = deliverHtml('My Song "Live"');
+    expect(html).toContain("My Song &quot;Live&quot;"); // title escaped
+    expect(html).toContain('id="e"'); // email
+    expect(html).toContain('id="n"'); // note
+    expect(html).toContain('id="d"'); // allow-download checkbox
+    expect(html).toContain("getElementById('e').value");
+    expect(html).toContain("allowDownload:document.getElementById('d').checked");
+    expect(html).toContain("cancelled:true");
+  });
+});
+
+describe("deliverConfirmHtml", () => {
+  it("names the email and bridges confirmed/cancelled", () => {
+    const html = deliverConfirmHtml("sarah@band.com");
+    expect(html).toContain("sarah@band.com");
+    expect(html).toContain("confirmed:true");
+    expect(html).toContain("cancelled:true");
+  });
+});
+
+describe("titlePromptHtml subtitle", () => {
+  it("uses a custom subtitle when given, default otherwise", () => {
+    expect(titlePromptHtml("type the title of the work you want to deliver:")).toContain("you want to deliver");
+    expect(titlePromptHtml()).toContain("these stems belong to"); // default preserved
+  });
+});
+
+describe("finalReportHtml deliver button", () => {
+  it("offers a deliver action alongside send stems", () => {
+    const html = finalReportHtml({
+      action: "registered", title: "T", workId: "w", recordingId: "r",
+    } as any);
+    expect(html).toContain("'deliver'");
+    expect(html).toContain("'sendStems'");
   });
 });
