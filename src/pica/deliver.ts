@@ -58,8 +58,16 @@ export async function deliverWork(deps: DeliverDeps, args: DeliverArgs): Promise
   }
 
   if (r && typeof r === "object" && r.error_code) {
-    if (r.error_code === FIRST_EXTERNAL) return { state: "needs_confirm", email };
-    return { state: "error", message: r.error || r.suggestion || "delivery failed", code: r.error_code };
+    // The MCP pica_share_send tool collapses the route's specific error_code to
+    // a generic SHARE_SEND_ERROR and preserves the real signal only in `status`
+    // and the `error` message (verified live). So detect the first-external
+    // confirmation via HTTP 428 (the route's code for it) or the message —
+    // NOT error_code === FIRST_EXTERNAL, which the tool rarely surfaces.
+    const msg = typeof r.error === "string" ? r.error : "";
+    if (r.error_code === FIRST_EXTERNAL || r.status === 428 || msg.includes(FIRST_EXTERNAL)) {
+      return { state: "needs_confirm", email };
+    }
+    return { state: "error", message: msg || r.suggestion || "delivery failed", code: r.error_code };
   }
 
   return {
