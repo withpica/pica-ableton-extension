@@ -40,9 +40,12 @@ import {
   finalReportHtml,
   duplicateChoiceHtml,
   titlePromptHtml,
+  deliverHtml,
+  deliverConfirmHtml,
   type RegisterReport,
   type StepResult,
 } from "./dialogHtml";
+import { deliverWork, isDeliverableEmail } from "./pica/deliver";
 import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } from "./session/renderTargets";
 import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUpload";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
@@ -82,6 +85,15 @@ export function activate(activation: ActivationContext): void {
   });
   void context.ui.registerContextMenuAction("AudioTrack", "Send stems to PICA", SEND_STEMS_ID);
   void context.ui.registerContextMenuAction("MidiTrack", "Send stems to PICA", SEND_STEMS_ID);
+
+  const DELIVER_ID = "pica.deliver";
+  context.commands.registerCommand(DELIVER_ID, () => {
+    void runDeliverStandalone(context, hostApiVersion).catch((e) => {
+      void showError(context, e instanceof Error ? e.message : String(e));
+    });
+  });
+  void context.ui.registerContextMenuAction("AudioTrack", "Deliver to… (PICA)", DELIVER_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Deliver to… (PICA)", DELIVER_ID);
 }
 
 async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: string): Promise<void> {
@@ -331,6 +343,9 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   if (reportAction === "sendStems" && r.recordingId) {
     await runSendStems(context, runWithClient, r.workId, r.recordingId).catch(() => undefined);
   }
+  if (reportAction === "deliver") {
+    await runDeliver(context, runWithClient, r.workId, answer.title!);
+  }
 }
 
 const AUDIO_W = 420;
@@ -487,11 +502,110 @@ async function runSendStemsStandalone(context: ExtensionContext<"1.0.0">, hostAp
   await runSendStems(context, runWithClient, found.workId, found.recordingId);
 }
 
+/**
+ * Stage 5: send a registered work to a recipient by email via pica_share_send.
+ * Shared by the in-flow report hook and the standalone command. Surfaces every
+ * failure — never swallows (cf. the stems hook's .catch(() => undefined)).
+ */
+async function runDeliver(
+  context: ExtensionContext<"1.0.0">,
+  run: ClientRunner,
+  workId: string,
+  workTitle: string,
+): Promise<void> {
+  const raw = await context.ui.showModalDialog(
+    `data:text/html,${encodeURIComponent(deliverHtml(workTitle))}`,
+    DELIVER_W,
+    DELIVER_H,
+  );
+  const ans = safeParse(raw) as { cancelled?: boolean; email?: string; note?: string; allowDownload?: boolean };
+  if (ans.cancelled) return;
+  const email = (ans.email ?? "").trim();
+  if (!isDeliverableEmail(email)) {
+    if (email) await showError(context, `"${email}" doesn't look like an email address. nothing was sent.`);
+    return;
+  }
+  const note = ans.note?.trim() || undefined;
+  const allowDownload = ans.allowDownload !== false; // default ON
+
+  let result = await run((c) => deliverWork({ client: c }, { workId, email, note, allowDownload }));
+
+  if (result.state === "needs_confirm") {
+    const confirmRaw = await context.ui.showModalDialog(
+      `data:text/html,${encodeURIComponent(deliverConfirmHtml(email))}`,
+      DELIVER_W,
+      DELIVER_CONFIRM_H,
+    );
+    const c = safeParse(confirmRaw) as { confirmed?: boolean; cancelled?: boolean };
+    if (!c.confirmed) return;
+    result = await run((cl) => deliverWork({ client: cl }, { workId, email, note, allowDownload, confirmFirstExternal: true }));
+  }
+
+  if (result.state === "sent") {
+    await showLink(
+      context,
+      "pica — delivered",
+      `emailed ${result.displayName ?? email} (${result.classification}).`,
+      result.shareUrl || `${BASE_URL}/inspect/works/${workId}`,
+    );
+  } else if (result.state === "error") {
+    await showError(context, `couldn't deliver: ${result.message}`);
+  }
+}
+
+/** Standalone entry: connect (if needed) → ask which work → resolve it → deliver. */
+async function runDeliverStandalone(context: ExtensionContext<"1.0.0">, hostApiVersion: string): Promise<void> {
+  const storageDir = context.environment.storageDirectory;
+  if (!storageDir) {
+    await showError(context, "No storage directory available — cannot read the PICA key.");
+    return;
+  }
+  let apiKey = await readApiKey(storageDir);
+  if (!apiKey) {
+    apiKey = await connectAndStoreKey(context, storageDir);
+    if (!apiKey) return;
+  }
+  let currentKey = apiKey!;
+  const runWithClient = <T>(fn: (c: PicaMcpClient) => Promise<T>) =>
+    withReconnect(
+      context,
+      storageDir,
+      (key: string) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key })),
+      currentKey,
+      (fresh) => {
+        currentKey = fresh;
+      },
+    );
+  const liveVersion = hostApiVersion ? `(api ${hostApiVersion})` : "";
+
+  const titleRaw = await context.ui.showModalDialog(
+    `data:text/html,${encodeURIComponent(titlePromptHtml("type the title of the work you want to deliver:"))}`,
+    TITLE_W,
+    TITLE_H,
+  );
+  const parsed = safeParse(titleRaw) as { title?: string; cancelled?: boolean };
+  const title = parsed.title?.trim();
+  if (parsed.cancelled || !title) return;
+
+  const found = await runWithClient(async (c) => {
+    await ensureIntroduced(c, liveVersion);
+    return findExistingRegistration(c, title);
+  });
+  if (!found?.workId) {
+    await showError(context, `no registered work titled "${title}" found. register it in PICA first, then deliver.`);
+    return;
+  }
+  await runDeliver(context, runWithClient, found.workId, title);
+}
+
 const CREDITS_W = 430;
 const CREDITS_H = 520;
 const WRITERS_W = 380;
 const WRITERS_H = 440;
 const REPORT_H = 460;
+const DELIVER_W = 380;
+const DELIVER_H = 340;
+const DELIVER_CONFIRM_H = 200;
 
 /** A reconnect-aware runner: builds a client (possibly from a fresh key) and runs `fn`. */
 type ClientRunner = <T>(fn: (c: PicaMcpClient) => Promise<T>) => Promise<T>;

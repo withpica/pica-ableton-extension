@@ -95,17 +95,55 @@ export function pasteKeyHtml(): string {
 }
 
 /** One-input prompt: ask for a work title; bridges {title} or {cancelled:true}. */
-export function titlePromptHtml(): string {
+export function titlePromptHtml(
+  subtitle = "type the title of the registered work these stems belong to:",
+): string {
   const confirmJs = bridgeSend("JSON.stringify({title:document.getElementById('t').value.trim()})");
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
   return (
     `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
     `<div style="color:#B87333;margin-bottom:8px">pica — which work?</div>` +
-    `type the title of the registered work these stems belong to:` +
+    `${escapeHtml(subtitle)}` +
     `<div style="margin-top:10px"><input id="t" placeholder="work title" ` +
     `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></div>` +
     `<div style="margin-top:12px"><button onclick="${escapeHtml(confirmJs)}">find</button> ` +
     `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
+  );
+}
+
+/** Deliver dialog: email + optional note + allow-download toggle.
+ *  Bridges {cancelled:true} or {email, note, allowDownload}. */
+export function deliverHtml(workTitle: string): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const sendJs = bridgeSend(
+    "JSON.stringify({email:document.getElementById('e').value.trim()," +
+      "note:document.getElementById('n').value.trim()," +
+      "allowDownload:document.getElementById('d').checked})",
+  );
+  return (
+    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<div style="color:#B87333;margin-bottom:8px">pica — deliver "${escapeHtml(workTitle)}"</div>` +
+    `send this work to someone by email. they get a private link (revocable, expires in 30 days).` +
+    `<div style="margin-top:10px"><input id="e" placeholder="email address" ` +
+    `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></div>` +
+    `<div style="margin-top:10px"><textarea id="n" placeholder="optional message" rows="3" ` +
+    `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></textarea></div>` +
+    `<div style="margin-top:10px"><label style="font-size:12px"><input type="checkbox" id="d" checked> allow download of attached audio</label></div>` +
+    `<div style="margin-top:12px"><button onclick="${escapeHtml(sendJs)}">send</button> ` +
+    `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
+  );
+}
+
+/** First-external-send confirmation. Bridges {confirmed:true} or {cancelled:true}. */
+export function deliverConfirmHtml(email: string): string {
+  const yesJs = bridgeSend("JSON.stringify({confirmed:true})");
+  const noJs = bridgeSend("JSON.stringify({cancelled:true})");
+  return (
+    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<div style="color:#B87333;margin-bottom:8px">pica — confirm recipient</div>` +
+    `first time sending to ${escapeHtml(email)}. is that address correct?` +
+    `<div style="margin-top:12px"><button onclick="${escapeHtml(yesJs)}">yes, send</button> ` +
+    `<button onclick="${escapeHtml(noJs)}">cancel</button></div>`
   );
 }
 
@@ -222,6 +260,7 @@ export function finalReportHtml(report: RegisterReport): string {
     `${escapeHtml(lines.join("\n"))}` +
     `<div style="margin-top:14px">${links}</div>` +
     `<div style="margin-top:14px"><button onclick="${bridgeSend("'sendStems'")}">send stems →</button></div>` +
+    `<div style="margin-top:8px"><button onclick="${bridgeSend("'deliver'")}">deliver this →</button></div>` +
     closeButton()
   );
 }
