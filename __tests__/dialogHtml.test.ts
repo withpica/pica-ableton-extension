@@ -153,6 +153,7 @@ describe("deliverHtml", () => {
     expect(html).toContain('id="n"'); // note
     expect(html).toContain('id="d"'); // allow-download checkbox
     expect(html).toContain("getElementById('e').value");
+    expect(html).toContain("note:document.getElementById('n').value");
     expect(html).toContain("allowDownload:document.getElementById('d').checked");
     expect(html).toContain("cancelled:true");
   });
@@ -164,6 +165,12 @@ describe("deliverConfirmHtml", () => {
     expect(html).toContain("sarah@band.com");
     expect(html).toContain("confirmed:true");
     expect(html).toContain("cancelled:true");
+  });
+
+  it("escapes html-special characters in the email", () => {
+    const html = deliverConfirmHtml('evil <script> "person"@x.com');
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("&quot;person&quot;");
   });
 });
 
