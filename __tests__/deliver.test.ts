@@ -42,8 +42,16 @@ describe("deliverWork", () => {
     expect(client.callTool.mock.calls[0]?.[1]?.scope).toBe("view");
   });
 
-  it("returns needs_confirm when the RESOLVED result carries the first-external code", async () => {
-    const client = fakeClient(() => ({ error: "first send", error_code: "FIRST_EXTERNAL_SEND_CONFIRMATION_REQUIRED", suggestion: "confirm" }));
+  it("returns needs_confirm on the REAL tool error shape (status 428, generic error_code)", async () => {
+    // The MCP pica_share_send tool collapses the route's specific error_code to
+    // a generic SHARE_SEND_ERROR and only preserves the real signal in `status`
+    // (428) and the `error` message — verified live against staging. Detection
+    // must key on status/message, NOT error_code === FIRST_EXTERNAL.
+    const client = fakeClient(() => ({
+      error: 'API request failed: 428 {"error_code":"FIRST_EXTERNAL_SEND_CONFIRMATION_REQUIRED"}',
+      error_code: "SHARE_SEND_ERROR",
+      status: 428,
+    }));
     const r = await deliverWork({ client }, base);
     expect(r).toEqual({ state: "needs_confirm", email: "sarah@band.com" });
   });
@@ -60,10 +68,18 @@ describe("deliverWork", () => {
     expect(client.callTool.mock.calls[0]?.[1]?.confirm_first_external_send).toBe(true);
   });
 
-  it("surfaces a generic RESOLVED error with its code and message", async () => {
-    const client = fakeClient(() => ({ error: "slow down", error_code: "SENDER_RATE_LIMIT_EXCEEDED", suggestion: "wait" }));
+  it("surfaces a generic RESOLVED error (real shape: message + generic code)", async () => {
+    // Real shape for a non-428 failure: SHARE_SEND_ERROR + status + message.
+    const client = fakeClient(() => ({
+      error: "sender has sent 20 external shares in the last 24h",
+      error_code: "SHARE_SEND_ERROR",
+      status: 429,
+      suggestion: "wait",
+    }));
     const r = await deliverWork({ client }, base);
-    expect(r).toEqual({ state: "error", message: "slow down", code: "SENDER_RATE_LIMIT_EXCEEDED" });
+    expect(r.state).toBe("error");
+    expect(r).toMatchObject({ state: "error", code: "SHARE_SEND_ERROR" });
+    expect((r as { message?: string }).message).toContain("external shares");
   });
 
   it("surfaces a THROWN error (network/HTTP)", async () => {
