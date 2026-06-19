@@ -341,7 +341,13 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     writers,
   });
   if (reportAction === "sendStems" && r.recordingId) {
-    await runSendStems(context, runWithClient, r.workId, r.recordingId).catch(() => undefined);
+    // Surface a thrown stems failure instead of swallowing it. The register
+    // already succeeded, so a stems error must not look like a register
+    // failure — but it must not silently vanish either (per-stem errors show
+    // via runSendStems' own results dialog; this catches an outright throw).
+    await runSendStems(context, runWithClient, r.workId, r.recordingId).catch((e) =>
+      showError(context, e instanceof Error ? e.message : String(e)),
+    );
   }
   if (reportAction === "deliver") {
     await runDeliver(context, runWithClient, r.workId, answer.title!);
