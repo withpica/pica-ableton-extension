@@ -52,7 +52,7 @@ export async function deliverWork(deps: DeliverDeps, args: DeliverArgs): Promise
   } catch (e) {
     if (e instanceof PicaMcpError) {
       if (e.code === FIRST_EXTERNAL) return { state: "needs_confirm", email };
-      return { state: "error", message: e.message, code: e.code };
+      return { state: "error", message: friendlyDeliverError(e.message), code: e.code };
     }
     return { state: "error", message: String(e) };
   }
@@ -67,7 +67,7 @@ export async function deliverWork(deps: DeliverDeps, args: DeliverArgs): Promise
     if (r.error_code === FIRST_EXTERNAL || r.status === 428 || msg.includes(FIRST_EXTERNAL)) {
       return { state: "needs_confirm", email };
     }
-    return { state: "error", message: msg || r.suggestion || "delivery failed", code: r.error_code };
+    return { state: "error", message: friendlyDeliverError(msg, r.suggestion), code: r.error_code };
   }
 
   return {
@@ -76,4 +76,44 @@ export async function deliverWork(deps: DeliverDeps, args: DeliverArgs): Promise
     classification: r?.recipient_resolution?.classification ?? "external",
     displayName: r?.recipient_resolution?.display_name ?? null,
   };
+}
+
+/**
+ * Render a plain-language message from pica_share_send's raw error. The MCP
+ * tool collapses the real code into a generic SHARE_SEND_ERROR and nests the
+ * truth as "API request failed: <status> {json}" in the message — so parse the
+ * inner JSON and map the real code / retry_after to language a human reads,
+ * instead of dumping raw JSON in the dialog.
+ */
+export function friendlyDeliverError(rawMessage: string, suggestion?: string): string {
+  let code = "";
+  let inner = "";
+  let retryAfter = 0;
+  const start = rawMessage.indexOf("{");
+  if (start >= 0) {
+    try {
+      const p = JSON.parse(rawMessage.slice(start));
+      code = typeof p.error_code === "string" ? p.error_code : "";
+      inner = typeof p.error === "string" ? p.error : "";
+      retryAfter = typeof p.retry_after_seconds === "number" ? p.retry_after_seconds : 0;
+    } catch {
+      /* not JSON — fall through to the raw text */
+    }
+  }
+  const hrs = retryAfter > 0 ? Math.max(1, Math.round(retryAfter / 3600)) : 0;
+  const later = hrs ? ` try again in ~${hrs}h.` : "";
+  switch (code) {
+    case "RECIPIENT_VOLUME_EXCEEDED":
+      return `that recipient has had a lot of email from PICA recently, so this was held back.${later}`;
+    case "SENDER_RATE_LIMIT_EXCEEDED":
+      return `you've sent a lot of shares in the last day.${later || " try again later."}`;
+    case "ROLE_ADDRESS_REJECTED":
+      return "that looks like a role inbox (noreply@, admin@, …) — use the person's own email.";
+    case "RECIPIENT_NOT_FOUND":
+      return "couldn't find that recipient — check the email address.";
+    case "ENTITY_NOT_FOUND":
+      return "couldn't find that work in your catalog.";
+    default:
+      return inner || suggestion || rawMessage || "delivery failed.";
+  }
 }
