@@ -113,6 +113,23 @@ describe("withReconnect", () => {
     expect(make).toHaveBeenNthCalledWith(2, KEY);
   });
 
+  it("reconnects once on INSUFFICIENT_SCOPE then retries with the fresh key", async () => {
+    // An under-scoped (but valid) key isn't a 401 — it returns
+    // error_code INSUFFICIENT_SCOPE. Reconnecting re-mints with the current
+    // scope set, so this must trigger the same reconnect-and-retry as a 401.
+    const { ctx } = fakeContext([JSON.stringify({ apiKey: KEY })]);
+    const make = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new PicaMcpError("Scope 'write:files' is required for tool 'pica_audio_presigned_upload'", "INSUFFICIENT_SCOPE"),
+      )
+      .mockResolvedValueOnce("ok");
+    const out = await withReconnect(ctx, "/tmp/store", make, "old-key");
+    expect(out).toBe("ok");
+    expect(make).toHaveBeenNthCalledWith(1, "old-key");
+    expect(make).toHaveBeenNthCalledWith(2, KEY);
+  });
+
   it("rethrows the 401 if the user declines to reconnect", async () => {
     const { ctx } = fakeContext([JSON.stringify({ cancelled: true })]); // connect returns null
     const make = vi
