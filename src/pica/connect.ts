@@ -72,8 +72,9 @@ export async function connectAndStoreKey(
 }
 
 /**
- * Run `make(key)`; on a 401 PicaMcpError, run Connect once for a fresh key and
- * retry exactly once. A declined reconnect or a non-401 error propagates.
+ * Run `make(key)`; on a 401 or INSUFFICIENT_SCOPE PicaMcpError, run Connect
+ * once for a fresh key and retry exactly once. A declined reconnect or any
+ * other error propagates.
  */
 export async function withReconnect<T>(
   context: ExtensionContext<"1.0.0">,
@@ -85,9 +86,18 @@ export async function withReconnect<T>(
   try {
     return await make(key);
   } catch (e) {
-    // Matches HTTP 401 only: PicaMcpError.code is the stringified HTTP status
-    // (mcpClient.ts), and a bearer rejection on /api/mcp is a real HTTP 401.
-    if (e instanceof PicaMcpError && e.code === "401") {
+    // Reconnect-and-retry on two recoverable credential failures:
+    //  - "401": the bearer is invalid/expired (PicaMcpError.code is the
+    //    stringified HTTP status — mcpClient.ts).
+    //  - "INSUFFICIENT_SCOPE": the key is VALID but under-scoped for this tool
+    //    (e.g. an old write:catalog-only key hitting pica_audio_presigned_upload,
+    //    which needs write:files). The mint now grants the full feature scope
+    //    set, so re-minting fixes it — without this, an under-scoped key
+    //    dead-ends with no way to refresh from inside the extension.
+    if (
+      e instanceof PicaMcpError &&
+      (e.code === "401" || e.code === "INSUFFICIENT_SCOPE")
+    ) {
       const fresh = await connectAndStoreKey(context, storageDir);
       if (!fresh) throw e;
       // Let the caller carry the fresh key into subsequent calls in this run.
