@@ -50,6 +50,8 @@ import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } fro
 import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUpload";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
 import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./pica/ownership";
+import { stemPhaseLabel, IDLE_LINES } from "./storyCopy";
+import { withStory } from "./progress";
 
 const BASE_URL = "https://withpica.com";
 const PANEL_W = 380;
@@ -373,6 +375,7 @@ const AUDIO_H = 480;
 const TITLE_W = 380;
 const TITLE_H = 220;
 const MAX_MB = Math.round(MAX_UPLOAD_BYTES / 1048576);
+const STORY_INTERVAL_MS = 2500;
 
 /**
  * Stage 3: render the chosen audio tracks pre-fx and upload each as a stem
@@ -429,42 +432,92 @@ async function runSendStems(
   const chosen = answer.stems.filter((s) => s.include);
   const results: string[] = [];
 
-  await context.ui.withinProgressDialog("uploading stems…", { progress: 0 }, async (update, signal) => {
-    let done = 0;
-    for (const s of chosen) {
-      if (signal.aborted) break;
-      const target = targets[s.index];
-      if (!target) {
-        done++;
-        continue;
-      }
-      const label = (s.label || target.label).trim() || target.name;
-      const pct = Math.round((done / chosen.length) * 100);
-      await update(`rendering ${label}…`, pct);
-      try {
-        // The high-level Resources.renderPreFxAudio takes a typed AudioTrack; our
-        // structural TrackLike is the same live object handed back unchanged from
-        // deriveRenderTargets — cast at this single IO boundary.
-        const wavPath = await context.resources.renderPreFxAudio(target.track as never, 0, songEnd);
-        const size = statSync(wavPath).size;
-        if (exceedsCap(size)) {
-          results.push(`✗ ${label} — too large (${Math.round(size / 1048576)}MB > ${MAX_MB}MB); flatten a shorter range`);
-        } else {
-          await update(`uploading ${label}…`, pct);
-          await run((c) =>
-            uploadRenderedStem(
-              { client: c, fetchFn: fetch, readFile },
-              { wavPath, fileName: `${label}.wav`, fileSize: size, recordingId, workId, stemLabel: label },
-            ),
-          );
-          results.push(`✓ ${label}`);
+  await context.ui.withinProgressDialog(
+    "preparing your stems…",
+    { progress: 0 },
+    async (update, signal) => {
+      const total = chosen.length;
+      let done = 0;
+      let storyTick = 0;
+      for (const s of chosen) {
+        if (signal.aborted) break;
+        const target = targets[s.index];
+        if (!target) {
+          done++;
+          continue;
         }
-      } catch (e) {
-        results.push(`✗ ${label} — ${e instanceof Error ? e.message : String(e)}`);
+        const label = (s.label || target.label).trim() || target.name;
+        // Render takes the first half of this stem's slice, upload the second —
+        // so the bar moves *within* a single stem (fixes the frozen-0% case).
+        const renderPct = Math.round((done / total) * 100);
+        const uploadPct = Math.round(((done + 0.5) / total) * 100);
+        try {
+          // The high-level Resources.renderPreFxAudio takes a typed AudioTrack; our
+          // structural TrackLike is the same live object handed back unchanged from
+          // deriveRenderTargets — cast at this single IO boundary.
+          const wavPath = await withStory(
+            update,
+            signal,
+            {
+              steadyLabel: stemPhaseLabel("render", label),
+              pct: renderPct,
+              idleLines: IDLE_LINES,
+              intervalMs: STORY_INTERVAL_MS,
+              startTick: storyTick,
+            },
+            () =>
+              context.resources.renderPreFxAudio(
+                target.track as never,
+                0,
+                songEnd,
+              ),
+          );
+          storyTick += 2;
+          const size = statSync(wavPath).size;
+          if (exceedsCap(size)) {
+            results.push(
+              `✗ ${label} — too large (${Math.round(size / 1048576)}MB > ${MAX_MB}MB); flatten a shorter range`,
+            );
+          } else {
+            const sizeMb = Math.round(size / 1048576);
+            await withStory(
+              update,
+              signal,
+              {
+                steadyLabel: stemPhaseLabel("upload", label, sizeMb),
+                pct: uploadPct,
+                idleLines: IDLE_LINES,
+                intervalMs: STORY_INTERVAL_MS,
+                startTick: storyTick,
+              },
+              () =>
+                run((c) =>
+                  uploadRenderedStem(
+                    { client: c, fetchFn: fetch, readFile },
+                    {
+                      wavPath,
+                      fileName: `${label}.wav`,
+                      fileSize: size,
+                      recordingId,
+                      workId,
+                      stemLabel: label,
+                    },
+                  ),
+                ),
+            );
+            storyTick += 2;
+            await update(stemPhaseLabel("queued", label), uploadPct);
+            results.push(`✓ ${label}`);
+          }
+        } catch (e) {
+          results.push(
+            `✗ ${label} — ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+        done++;
       }
-      done++;
-    }
-  });
+    },
+  );
 
   await showLink(
     context,
