@@ -50,7 +50,7 @@ import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } fro
 import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUpload";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
 import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./pica/ownership";
-import { stemPhaseLabel, IDLE_LINES } from "./storyCopy";
+import { stemPhaseLabel, IDLE_LINES, deliverPhaseLabel } from "./storyCopy";
 import { withStory } from "./progress";
 
 const BASE_URL = "https://withpica.com";
@@ -601,7 +601,14 @@ async function runDeliver(
   const note = ans.note?.trim() || undefined;
   const allowDownload = ans.allowDownload !== false; // default ON
 
-  let result = await run((c) => deliverWork({ client: c }, { workId, email, note, allowDownload }));
+  let result = (await context.ui.withinProgressDialog(
+    deliverPhaseLabel(workTitle, email),
+    { progress: 40 },
+    async () =>
+      run((c) =>
+        deliverWork({ client: c }, { workId, email, note, allowDownload }),
+      ),
+  )) as Awaited<ReturnType<typeof deliverWork>>;
 
   if (result.state === "needs_confirm") {
     const confirmRaw = await context.ui.showModalDialog(
@@ -611,7 +618,17 @@ async function runDeliver(
     );
     const c = safeParse(confirmRaw) as { confirmed?: boolean; cancelled?: boolean };
     if (!c.confirmed) return;
-    result = await run((cl) => deliverWork({ client: cl }, { workId, email, note, allowDownload, confirmFirstExternal: true }));
+    result = (await context.ui.withinProgressDialog(
+      deliverPhaseLabel(workTitle, email),
+      { progress: 60 },
+      async () =>
+        run((cl) =>
+          deliverWork(
+            { client: cl },
+            { workId, email, note, allowDownload, confirmFirstExternal: true },
+          ),
+        ),
+    )) as Awaited<ReturnType<typeof deliverWork>>;
   }
 
   if (result.state === "sent") {
