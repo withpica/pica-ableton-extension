@@ -76,6 +76,22 @@ export function linkMessageHtml(title: string, body: string, url: string): strin
   );
 }
 
+/** Stems-logged completion: result lines + a copy-able PICA link + a
+ *  "share with →" follow-on (bridges 'share') + close. */
+export function stemsReportHtml(body: string, url: string): string {
+  const safeUrl = escapeHtml(url);
+  return (
+    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<div style="color:#B87333;margin-bottom:8px">pica — stems logged</div>` +
+    `${escapeHtml(body)}` +
+    `<div style="margin-top:12px;word-break:break-all">` +
+    `<a id="u" href="${safeUrl}" target="_blank" style="color:#B87333">${safeUrl}</a></div>` +
+    `<div style="margin-top:12px"><button onclick="${escapeHtml(copyLinkJs("u"))}">copy link</button></div>` +
+    `<div style="margin-top:14px"><button onclick="${bridgeSend("'share'")}">share with →</button></div>` +
+    `<div style="margin-top:8px"><button onclick="${CLOSE_JS}">close</button></div>`
+  );
+}
+
 /** Paste-key dialog: one input + connect/cancel buttons, both bridging via close_and_send. */
 export function pasteKeyHtml(): string {
   const connectJs = bridgeSend(
@@ -111,7 +127,7 @@ export function titlePromptHtml(
   );
 }
 
-/** Deliver dialog: email + optional note + allow-download toggle.
+/** Share dialog: email + optional note + allow-download toggle.
  *  Bridges {cancelled:true} or {email, note, allowDownload}. */
 export function deliverHtml(workTitle: string): string {
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
@@ -122,26 +138,26 @@ export function deliverHtml(workTitle: string): string {
   );
   return (
     `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">pica — deliver "${escapeHtml(workTitle)}"</div>` +
-    `send this work to someone by email. they get a private link (revocable, expires in 30 days).` +
+    `<div style="color:#B87333;margin-bottom:8px">pica — share "${escapeHtml(workTitle)}"</div>` +
+    `share this work with someone by email. they get a private link (revocable, expires in 30 days).` +
     `<div style="margin-top:10px"><input id="e" placeholder="email address" ` +
     `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></div>` +
     `<div style="margin-top:10px"><textarea id="n" placeholder="optional message" rows="3" ` +
     `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></textarea></div>` +
     `<div style="margin-top:10px"><label style="font-size:12px"><input type="checkbox" id="d" checked> allow download of attached audio</label></div>` +
-    `<div style="margin-top:12px"><button onclick="${escapeHtml(sendJs)}">send</button> ` +
+    `<div style="margin-top:12px"><button onclick="${escapeHtml(sendJs)}">share</button> ` +
     `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
   );
 }
 
-/** First-external-send confirmation. Bridges {confirmed:true} or {cancelled:true}. */
+/** First-external-share confirmation. Bridges {confirmed:true} or {cancelled:true}. */
 export function deliverConfirmHtml(email: string): string {
   const yesJs = bridgeSend("JSON.stringify({confirmed:true})");
   const noJs = bridgeSend("JSON.stringify({cancelled:true})");
   return (
     `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
     `<div style="color:#B87333;margin-bottom:8px">pica — confirm recipient</div>` +
-    `first time sending to ${escapeHtml(email)}. is that address correct?` +
+    `first time sharing with ${escapeHtml(email)}. is that address correct?` +
     `<div style="margin-top:12px"><button onclick="${escapeHtml(yesJs)}">yes, send</button> ` +
     `<button onclick="${escapeHtml(noJs)}">cancel</button></div>`
   );
@@ -259,8 +275,8 @@ export function finalReportHtml(report: RegisterReport): string {
     `<div style="color:#B87333;margin-bottom:8px">pica — registered</div>` +
     `${escapeHtml(lines.join("\n"))}` +
     `<div style="margin-top:14px">${links}</div>` +
-    `<div style="margin-top:14px"><button onclick="${bridgeSend("'sendStems'")}">send stems →</button></div>` +
-    `<div style="margin-top:8px"><button onclick="${bridgeSend("'deliver'")}">deliver this →</button></div>` +
+    `<div style="margin-top:14px"><button onclick="${bridgeSend("'sendStems'")}">log stems →</button></div>` +
+    `<div style="margin-top:8px"><button onclick="${bridgeSend("'deliver'")}">share with →</button></div>` +
     closeButton()
   );
 }
