@@ -42,6 +42,7 @@ import {
   titlePromptHtml,
   deliverHtml,
   deliverConfirmHtml,
+  stemsReportHtml,
   type RegisterReport,
   type StepResult,
 } from "./dialogHtml";
@@ -82,8 +83,8 @@ export function activate(activation: ActivationContext): void {
   });
 
   // No global scope exists — offer the action by right-clicking a track.
-  void context.ui.registerContextMenuAction("AudioTrack", "Register Set in PICA", COMMAND_ID);
-  void context.ui.registerContextMenuAction("MidiTrack", "Register Set in PICA", COMMAND_ID);
+  void context.ui.registerContextMenuAction("AudioTrack", "Register set in PICA", COMMAND_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Register set in PICA", COMMAND_ID);
 
   // Standalone "Send stems to PICA": resolve an already-registered work by title,
   // then run the render/upload loop against its master recording.
@@ -93,8 +94,8 @@ export function activate(activation: ActivationContext): void {
       void showError(context, e instanceof Error ? e.message : String(e));
     });
   });
-  void context.ui.registerContextMenuAction("AudioTrack", "Send stems to PICA", SEND_STEMS_ID);
-  void context.ui.registerContextMenuAction("MidiTrack", "Send stems to PICA", SEND_STEMS_ID);
+  void context.ui.registerContextMenuAction("AudioTrack", "Log stems in PICA", SEND_STEMS_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Log stems in PICA", SEND_STEMS_ID);
 
   const DELIVER_ID = "pica.deliver";
   context.commands.registerCommand(DELIVER_ID, () => {
@@ -102,8 +103,8 @@ export function activate(activation: ActivationContext): void {
       void showError(context, e instanceof Error ? e.message : String(e));
     });
   });
-  void context.ui.registerContextMenuAction("AudioTrack", "Deliver to… (PICA)", DELIVER_ID);
-  void context.ui.registerContextMenuAction("MidiTrack", "Deliver to… (PICA)", DELIVER_ID);
+  void context.ui.registerContextMenuAction("AudioTrack", "Share with… (PICA)", DELIVER_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Share with… (PICA)", DELIVER_ID);
 }
 
 async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: string): Promise<void> {
@@ -368,7 +369,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
       // already succeeded, so a stems error must not look like a register
       // failure — but it must not silently vanish either (per-stem errors show
       // via runSendStems' own results dialog; this catches an outright throw).
-      await runSendStems(context, runWithClient, r.workId, r.recordingId).catch((e) =>
+      await runSendStems(context, runWithClient, r.workId, r.recordingId, answer.title!).catch((e) =>
         showError(context, e instanceof Error ? e.message : String(e)),
       );
     }
@@ -395,6 +396,7 @@ async function runSendStems(
   run: ClientRunner,
   workId: string,
   recordingId: string,
+  workTitle: string,
 ): Promise<void> {
   const song = context.application.song;
   const allTracks = (song.tracks ?? []) as unknown as TrackLike[];
@@ -527,12 +529,19 @@ async function runSendStems(
     },
   );
 
-  await showLink(
-    context,
-    "pica — stems",
-    results.length ? results.join("\n") : "no stems selected.",
-    `${BASE_URL}/inspect/recordings/${recordingId}`,
+  const body = results.length ? results.join("\n") : "no stems selected.";
+  const url = `${BASE_URL}/inspect/recordings/${recordingId}`;
+  const action = await context.ui.showModalDialog(
+    `data:text/html,${encodeURIComponent(stemsReportHtml(body, url))}`,
+    360,
+    320,
   );
+  // Host won't open a second modal in the same turn the previous one closes —
+  // yield so the share dialog can open (same pattern as the register report).
+  if (action === "share") {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await runDeliver(context, run, workId, workTitle);
+  }
 }
 
 /** Standalone entry: connect (if needed) → ask which work → resolve it → send stems. */
@@ -580,7 +589,7 @@ async function runSendStemsStandalone(context: ExtensionContext<"1.0.0">, hostAp
     );
     return;
   }
-  await runSendStems(context, runWithClient, found.workId, found.recordingId);
+  await runSendStems(context, runWithClient, found.workId, found.recordingId, title);
 }
 
 /**
@@ -642,7 +651,7 @@ async function runDeliver(
   if (result.state === "sent") {
     await showLink(
       context,
-      "pica — delivered",
+      "pica — shared",
       `emailed ${result.displayName ?? email} (${result.classification}).`,
       result.shareUrl || `${BASE_URL}/inspect/works/${workId}`,
     );
@@ -677,7 +686,7 @@ async function runDeliverStandalone(context: ExtensionContext<"1.0.0">, hostApiV
   const liveVersion = hostApiVersion ? `(api ${hostApiVersion})` : "";
 
   const titleRaw = await context.ui.showModalDialog(
-    `data:text/html,${encodeURIComponent(titlePromptHtml("type the title of the work you want to deliver:"))}`,
+    `data:text/html,${encodeURIComponent(titlePromptHtml("type the title of the work you want to share:"))}`,
     TITLE_W,
     TITLE_H,
   );
