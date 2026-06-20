@@ -63,10 +63,10 @@ import {
 import { withStory } from "./progress";
 
 const BASE_URL = "https://withpica.com";
-const PANEL_W = 380;
-const PANEL_H = 460;
-const CHOICE_W = 420;
-const CHOICE_H = 320;
+const PANEL_W = 460;
+const PANEL_H = 520;
+const CHOICE_W = 480;
+const CHOICE_H = 380;
 
 export function activate(activation: ActivationContext): void {
   // Capture the host API version from the ActivationContext before initialize consumes it.
@@ -356,10 +356,10 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   await runReportFollowOn(context, runWithClient, reportAction, r.workId, r.recordingId, answer.title!);
 }
 
-const AUDIO_W = 420;
-const AUDIO_H = 480;
-const TITLE_W = 380;
-const TITLE_H = 220;
+const AUDIO_W = 520;
+const AUDIO_H = 600;
+const TITLE_W = 460;
+const TITLE_H = 250;
 const MAX_MB = Math.round(MAX_UPLOAD_BYTES / 1048576);
 const STORY_INTERVAL_MS = 2500;
 
@@ -510,8 +510,8 @@ async function runSendStems(
   const url = `${BASE_URL}/inspect/recordings/${recordingId}`;
   const action = await context.ui.showModalDialog(
     `data:text/html,${encodeURIComponent(stemsReportHtml(body, url))}`,
-    360,
-    320,
+    460,
+    440,
   );
   // Host won't open a second modal in the same turn the previous one closes —
   // yield so the share dialog can open (same pattern as the register report).
@@ -682,14 +682,14 @@ async function runDeliverStandalone(context: ExtensionContext<"1.0.0">, hostApiV
   await runDeliver(context, runWithClient, found.workId, title);
 }
 
-const CREDITS_W = 430;
-const CREDITS_H = 520;
-const WRITERS_W = 380;
-const WRITERS_H = 440;
-const REPORT_H = 460;
-const DELIVER_W = 380;
-const DELIVER_H = 340;
-const DELIVER_CONFIRM_H = 200;
+const CREDITS_W = 540;
+const CREDITS_H = 620;
+const WRITERS_W = 480;
+const WRITERS_H = 520;
+const REPORT_H = 540;
+const DELIVER_W = 460;
+const DELIVER_H = 400;
+const DELIVER_CONFIRM_H = 240;
 
 /** A reconnect-aware runner: builds a client (possibly from a fresh key) and runs `fn`. */
 type ClientRunner = <T>(fn: (c: PicaMcpClient) => Promise<T>) => Promise<T>;
@@ -774,21 +774,21 @@ async function runWritersFlow(
 }
 
 async function showDialog(context: ExtensionContext<"1.0.0">, html: string, height: number): Promise<void> {
-  await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(html)}`, 360, height);
+  await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(html)}`, 440, height);
 }
 
 function showError(context: ExtensionContext<"1.0.0">, body: string): Promise<void> {
-  return showDialog(context, messageHtml("pica — error", body), 200);
+  return showDialog(context, messageHtml("pica — error", body), 240);
 }
 
 /** Info dialog carrying a PICA link (clickable anchor + copy + selectable text). */
 function showLink(context: ExtensionContext<"1.0.0">, title: string, body: string, url: string): Promise<void> {
-  return showDialog(context, linkMessageHtml(title, body, url), 320);
+  return showDialog(context, linkMessageHtml(title, body, url), 400);
 }
 
 /** The ONE consolidated end-of-flow report: lead line + per-step outcomes + the three links. */
 function showReport(context: ExtensionContext<"1.0.0">, report: RegisterReport): Promise<string> {
-  return context.ui.showModalDialog(`data:text/html,${encodeURIComponent(finalReportHtml(report))}`, 360, REPORT_H);
+  return context.ui.showModalDialog(`data:text/html,${encodeURIComponent(finalReportHtml(report))}`, 460, REPORT_H);
 }
 
 /** Apply a register-report follow-on (log stems / share with), carrying work context.
