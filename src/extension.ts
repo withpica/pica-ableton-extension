@@ -42,6 +42,7 @@ import {
   titlePromptHtml,
   deliverHtml,
   deliverConfirmHtml,
+  stemsReportHtml,
   type RegisterReport,
   type StepResult,
 } from "./dialogHtml";
@@ -50,12 +51,22 @@ import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } fro
 import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUpload";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
 import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./pica/ownership";
+import {
+  stemsOpenerLabel,
+  stemPhaseLabel,
+  IDLE_LINES,
+  deliverPhaseLabel,
+  registerPhaseLabel,
+  creditsPhaseLabel,
+  writersPhaseLabel,
+} from "./storyCopy";
+import { withStory } from "./progress";
 
 const BASE_URL = "https://withpica.com";
-const PANEL_W = 380;
-const PANEL_H = 460;
-const CHOICE_W = 420;
-const CHOICE_H = 320;
+const PANEL_W = 460;
+const PANEL_H = 520;
+const CHOICE_W = 480;
+const CHOICE_H = 380;
 
 export function activate(activation: ActivationContext): void {
   // Capture the host API version from the ActivationContext before initialize consumes it.
@@ -72,8 +83,8 @@ export function activate(activation: ActivationContext): void {
   });
 
   // No global scope exists — offer the action by right-clicking a track.
-  void context.ui.registerContextMenuAction("AudioTrack", "Register Set in PICA", COMMAND_ID);
-  void context.ui.registerContextMenuAction("MidiTrack", "Register Set in PICA", COMMAND_ID);
+  void context.ui.registerContextMenuAction("AudioTrack", "Register set in PICA", COMMAND_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Register set in PICA", COMMAND_ID);
 
   // Standalone "Send stems to PICA": resolve an already-registered work by title,
   // then run the render/upload loop against its master recording.
@@ -83,8 +94,8 @@ export function activate(activation: ActivationContext): void {
       void showError(context, e instanceof Error ? e.message : String(e));
     });
   });
-  void context.ui.registerContextMenuAction("AudioTrack", "Send stems to PICA", SEND_STEMS_ID);
-  void context.ui.registerContextMenuAction("MidiTrack", "Send stems to PICA", SEND_STEMS_ID);
+  void context.ui.registerContextMenuAction("AudioTrack", "Log stems in PICA", SEND_STEMS_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Log stems in PICA", SEND_STEMS_ID);
 
   const DELIVER_ID = "pica.deliver";
   context.commands.registerCommand(DELIVER_ID, () => {
@@ -92,8 +103,8 @@ export function activate(activation: ActivationContext): void {
       void showError(context, e instanceof Error ? e.message : String(e));
     });
   });
-  void context.ui.registerContextMenuAction("AudioTrack", "Deliver to… (PICA)", DELIVER_ID);
-  void context.ui.registerContextMenuAction("MidiTrack", "Deliver to… (PICA)", DELIVER_ID);
+  void context.ui.registerContextMenuAction("AudioTrack", "Share with… (PICA)", DELIVER_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Share with… (PICA)", DELIVER_ID);
 }
 
 async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: string): Promise<void> {
@@ -162,7 +173,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     );
 
   const result = await context.ui.withinProgressDialog(
-    "Registering in PICA…",
+    registerPhaseLabel("introduce", answer.title!),
     { progress: 10 },
     async (update) => {
       // ensureIntroduced + registerSet are the register-phase network calls; run
@@ -170,9 +181,9 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
       // retries (the whole pair re-runs on retry). A DuplicateWorkError is not a
       // 401 → it propagates unchanged to the catch below.
       return runWithClient(async (c) => {
-        await update("Declaring agent identity…", 25);
+        await update(registerPhaseLabel("introduce", answer.title!), 25);
         await ensureIntroduced(c, liveVersion);
-        await update("Registering work + master recording…", 65);
+        await update(registerPhaseLabel("register", answer.title!), 65);
         return registerSet(c, {
           title: answer.title!,
           artistName: answer.artistName!,
@@ -233,7 +244,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
         const masterOwnership = await captureOwnership(recordingId);
         const spliceLogged = await captureSplice(recordingId);
         const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, []), [], candidates);
-        await showReport(context, {
+        const action = await showReport(context, {
           action: "version",
           title: answer.title!,
           workId: e.existingWorkId,
@@ -242,6 +253,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           spliceLogged,
           credits,
         });
+        await runReportFollowOn(context, runWithClient, action, e.existingWorkId, recordingId, answer.title!);
         return undefined;
       }
 
@@ -272,7 +284,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
         }
         const spliceLogged = await captureSplice(recordingId);
         const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, existing), existing, candidates);
-        await showReport(context, {
+        const action = await showReport(context, {
           action: "existing",
           title: answer.title!,
           workId: e.existingWorkId,
@@ -281,6 +293,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           spliceLogged,
           credits,
         });
+        await runReportFollowOn(context, runWithClient, action, e.existingWorkId, recordingId, answer.title!);
         return undefined;
       }
 
@@ -340,39 +353,15 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     credits,
     writers,
   });
-  // The report is a webview modal. Opening the next modal (stem picker /
-  // deliver dialog) in the SAME turn the report closes silently no-ops on the
-  // host — that's why the in-flow "send stems →" / "deliver this →" buttons
-  // did nothing. Yield so the host releases the modal slot before the
-  // follow-up flow opens its own dialog.
-  if (reportAction === "sendStems" || reportAction === "deliver") {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  if (reportAction === "sendStems") {
-    if (!r.recordingId) {
-      // Shouldn't happen after a successful register — but surface it rather
-      // than vanish (the old silent no-op was indistinguishable from this).
-      await showError(context, "couldn't start stems — no recording was created for this work.");
-    } else {
-      // Surface a thrown stems failure instead of swallowing it. The register
-      // already succeeded, so a stems error must not look like a register
-      // failure — but it must not silently vanish either (per-stem errors show
-      // via runSendStems' own results dialog; this catches an outright throw).
-      await runSendStems(context, runWithClient, r.workId, r.recordingId).catch((e) =>
-        showError(context, e instanceof Error ? e.message : String(e)),
-      );
-    }
-  }
-  if (reportAction === "deliver") {
-    await runDeliver(context, runWithClient, r.workId, answer.title!);
-  }
+  await runReportFollowOn(context, runWithClient, reportAction, r.workId, r.recordingId, answer.title!);
 }
 
-const AUDIO_W = 420;
-const AUDIO_H = 480;
-const TITLE_W = 380;
-const TITLE_H = 220;
+const AUDIO_W = 520;
+const AUDIO_H = 600;
+const TITLE_W = 460;
+const TITLE_H = 250;
 const MAX_MB = Math.round(MAX_UPLOAD_BYTES / 1048576);
+const STORY_INTERVAL_MS = 2500;
 
 /**
  * Stage 3: render the chosen audio tracks pre-fx and upload each as a stem
@@ -384,6 +373,7 @@ async function runSendStems(
   run: ClientRunner,
   workId: string,
   recordingId: string,
+  workTitle: string,
 ): Promise<void> {
   const song = context.application.song;
   const allTracks = (song.tracks ?? []) as unknown as TrackLike[];
@@ -429,49 +419,106 @@ async function runSendStems(
   const chosen = answer.stems.filter((s) => s.include);
   const results: string[] = [];
 
-  await context.ui.withinProgressDialog("uploading stems…", { progress: 0 }, async (update, signal) => {
-    let done = 0;
-    for (const s of chosen) {
-      if (signal.aborted) break;
-      const target = targets[s.index];
-      if (!target) {
-        done++;
-        continue;
-      }
-      const label = (s.label || target.label).trim() || target.name;
-      const pct = Math.round((done / chosen.length) * 100);
-      await update(`rendering ${label}…`, pct);
-      try {
-        // The high-level Resources.renderPreFxAudio takes a typed AudioTrack; our
-        // structural TrackLike is the same live object handed back unchanged from
-        // deriveRenderTargets — cast at this single IO boundary.
-        const wavPath = await context.resources.renderPreFxAudio(target.track as never, 0, songEnd);
-        const size = statSync(wavPath).size;
-        if (exceedsCap(size)) {
-          results.push(`✗ ${label} — too large (${Math.round(size / 1048576)}MB > ${MAX_MB}MB); flatten a shorter range`);
-        } else {
-          await update(`uploading ${label}…`, pct);
-          await run((c) =>
-            uploadRenderedStem(
-              { client: c, fetchFn: fetch, readFile },
-              { wavPath, fileName: `${label}.wav`, fileSize: size, recordingId, workId, stemLabel: label },
-            ),
-          );
-          results.push(`✓ ${label}`);
+  await context.ui.withinProgressDialog(
+    stemsOpenerLabel(),
+    { progress: 0 },
+    async (update, signal) => {
+      const total = chosen.length;
+      let done = 0;
+      let storyTick = 0;
+      for (const s of chosen) {
+        if (signal.aborted) break;
+        const target = targets[s.index];
+        if (!target) {
+          done++;
+          continue;
         }
-      } catch (e) {
-        results.push(`✗ ${label} — ${e instanceof Error ? e.message : String(e)}`);
+        const label = (s.label || target.label).trim() || target.name;
+        // Render takes the first half of this stem's slice, upload the second —
+        // so the bar moves *within* a single stem (fixes the frozen-0% case).
+        const renderPct = Math.round((done / total) * 100);
+        const uploadPct = Math.round(((done + 0.5) / total) * 100);
+        try {
+          // The high-level Resources.renderPreFxAudio takes a typed AudioTrack; our
+          // structural TrackLike is the same live object handed back unchanged from
+          // deriveRenderTargets — cast at this single IO boundary.
+          const wavPath = await withStory(
+            update,
+            signal,
+            {
+              steadyLabel: stemPhaseLabel("render", label),
+              pct: renderPct,
+              idleLines: IDLE_LINES,
+              intervalMs: STORY_INTERVAL_MS,
+              startTick: storyTick,
+            },
+            () =>
+              context.resources.renderPreFxAudio(
+                target.track as never,
+                0,
+                songEnd,
+              ),
+          );
+          storyTick += 3;
+          const size = statSync(wavPath).size;
+          if (exceedsCap(size)) {
+            results.push(
+              `✗ ${label} — too large (${Math.round(size / 1048576)}MB > ${MAX_MB}MB); flatten a shorter range`,
+            );
+          } else {
+            const sizeMb = Math.round(size / 1048576);
+            await withStory(
+              update,
+              signal,
+              {
+                steadyLabel: stemPhaseLabel("upload", label, sizeMb),
+                pct: uploadPct,
+                idleLines: IDLE_LINES,
+                intervalMs: STORY_INTERVAL_MS,
+                startTick: storyTick,
+              },
+              () =>
+                run((c) =>
+                  uploadRenderedStem(
+                    { client: c, fetchFn: fetch, readFile },
+                    {
+                      wavPath,
+                      fileName: `${label}.wav`,
+                      fileSize: size,
+                      recordingId,
+                      workId,
+                      stemLabel: label,
+                    },
+                  ),
+                ),
+            );
+            storyTick += 3;
+            await update(stemPhaseLabel("queued", label), uploadPct);
+            results.push(`✓ ${label}`);
+          }
+        } catch (e) {
+          results.push(
+            `✗ ${label} — ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+        done++;
       }
-      done++;
-    }
-  });
-
-  await showLink(
-    context,
-    "pica — stems",
-    results.length ? results.join("\n") : "no stems selected.",
-    `${BASE_URL}/inspect/recordings/${recordingId}`,
+    },
   );
+
+  const body = results.length ? results.join("\n") : "no stems selected.";
+  const url = `${BASE_URL}/inspect/recordings/${recordingId}`;
+  const action = await context.ui.showModalDialog(
+    `data:text/html,${encodeURIComponent(stemsReportHtml(body, url))}`,
+    460,
+    440,
+  );
+  // Host won't open a second modal in the same turn the previous one closes —
+  // yield so the share dialog can open (same pattern as the register report).
+  if (action === "share") {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await runDeliver(context, run, workId, workTitle);
+  }
 }
 
 /** Standalone entry: connect (if needed) → ask which work → resolve it → send stems. */
@@ -519,7 +566,7 @@ async function runSendStemsStandalone(context: ExtensionContext<"1.0.0">, hostAp
     );
     return;
   }
-  await runSendStems(context, runWithClient, found.workId, found.recordingId);
+  await runSendStems(context, runWithClient, found.workId, found.recordingId, title);
 }
 
 /**
@@ -548,7 +595,14 @@ async function runDeliver(
   const note = ans.note?.trim() || undefined;
   const allowDownload = ans.allowDownload !== false; // default ON
 
-  let result = await run((c) => deliverWork({ client: c }, { workId, email, note, allowDownload }));
+  let result = (await context.ui.withinProgressDialog(
+    deliverPhaseLabel(workTitle, email),
+    { progress: 40 },
+    async () =>
+      run((c) =>
+        deliverWork({ client: c }, { workId, email, note, allowDownload }),
+      ),
+  )) as Awaited<ReturnType<typeof deliverWork>>;
 
   if (result.state === "needs_confirm") {
     const confirmRaw = await context.ui.showModalDialog(
@@ -558,13 +612,23 @@ async function runDeliver(
     );
     const c = safeParse(confirmRaw) as { confirmed?: boolean; cancelled?: boolean };
     if (!c.confirmed) return;
-    result = await run((cl) => deliverWork({ client: cl }, { workId, email, note, allowDownload, confirmFirstExternal: true }));
+    result = (await context.ui.withinProgressDialog(
+      deliverPhaseLabel(workTitle, email),
+      { progress: 60 },
+      async () =>
+        run((cl) =>
+          deliverWork(
+            { client: cl },
+            { workId, email, note, allowDownload, confirmFirstExternal: true },
+          ),
+        ),
+    )) as Awaited<ReturnType<typeof deliverWork>>;
   }
 
   if (result.state === "sent") {
     await showLink(
       context,
-      "pica — delivered",
+      "pica — shared",
       `emailed ${result.displayName ?? email} (${result.classification}).`,
       result.shareUrl || `${BASE_URL}/inspect/works/${workId}`,
     );
@@ -599,7 +663,7 @@ async function runDeliverStandalone(context: ExtensionContext<"1.0.0">, hostApiV
   const liveVersion = hostApiVersion ? `(api ${hostApiVersion})` : "";
 
   const titleRaw = await context.ui.showModalDialog(
-    `data:text/html,${encodeURIComponent(titlePromptHtml("type the title of the work you want to deliver:"))}`,
+    `data:text/html,${encodeURIComponent(titlePromptHtml("type the title of the work you want to share:"))}`,
     TITLE_W,
     TITLE_H,
   );
@@ -618,14 +682,14 @@ async function runDeliverStandalone(context: ExtensionContext<"1.0.0">, hostApiV
   await runDeliver(context, runWithClient, found.workId, title);
 }
 
-const CREDITS_W = 430;
-const CREDITS_H = 520;
-const WRITERS_W = 380;
-const WRITERS_H = 440;
-const REPORT_H = 460;
-const DELIVER_W = 380;
-const DELIVER_H = 340;
-const DELIVER_CONFIRM_H = 200;
+const CREDITS_W = 540;
+const CREDITS_H = 620;
+const WRITERS_W = 480;
+const WRITERS_H = 520;
+const REPORT_H = 540;
+const DELIVER_W = 460;
+const DELIVER_H = 400;
+const DELIVER_CONFIRM_H = 240;
 
 /** A reconnect-aware runner: builds a client (possibly from a fresh key) and runs `fn`. */
 type ClientRunner = <T>(fn: (c: PicaMcpClient) => Promise<T>) => Promise<T>;
@@ -661,7 +725,7 @@ async function runCreditsFlow(
 
   try {
     const outcomes = (await context.ui.withinProgressDialog(
-      "saving credits…",
+      creditsPhaseLabel(),
       { progress: 30 },
       async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing, candidates)),
     )) as CreditOutcome[];
@@ -699,7 +763,7 @@ async function runWritersFlow(
 
   try {
     const outcomes = (await context.ui.withinProgressDialog(
-      "saving writers…",
+      writersPhaseLabel(),
       { progress: 30 },
       async () => run((c) => saveWriters(c, workId, answer.names!)),
     )) as WriterOutcome[];
@@ -710,19 +774,47 @@ async function runWritersFlow(
 }
 
 async function showDialog(context: ExtensionContext<"1.0.0">, html: string, height: number): Promise<void> {
-  await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(html)}`, 360, height);
+  await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(html)}`, 440, height);
 }
 
 function showError(context: ExtensionContext<"1.0.0">, body: string): Promise<void> {
-  return showDialog(context, messageHtml("pica — error", body), 200);
+  return showDialog(context, messageHtml("pica — error", body), 240);
 }
 
 /** Info dialog carrying a PICA link (clickable anchor + copy + selectable text). */
 function showLink(context: ExtensionContext<"1.0.0">, title: string, body: string, url: string): Promise<void> {
-  return showDialog(context, linkMessageHtml(title, body, url), 320);
+  return showDialog(context, linkMessageHtml(title, body, url), 400);
 }
 
 /** The ONE consolidated end-of-flow report: lead line + per-step outcomes + the three links. */
 function showReport(context: ExtensionContext<"1.0.0">, report: RegisterReport): Promise<string> {
-  return context.ui.showModalDialog(`data:text/html,${encodeURIComponent(finalReportHtml(report))}`, 360, REPORT_H);
+  return context.ui.showModalDialog(`data:text/html,${encodeURIComponent(finalReportHtml(report))}`, 460, REPORT_H);
+}
+
+/** Apply a register-report follow-on (log stems / share with), carrying work context.
+ *  Shared by the fresh-register path and both duplicate-path branches so the
+ *  report buttons work identically everywhere. */
+async function runReportFollowOn(
+  context: ExtensionContext<"1.0.0">,
+  run: ClientRunner,
+  action: string,
+  workId: string,
+  recordingId: string,
+  workTitle: string,
+): Promise<void> {
+  if (action !== "sendStems" && action !== "deliver") return;
+  // The report is a webview modal; the host won't open a second modal in the
+  // same turn the previous one closes — yield so the follow-up dialog opens.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  if (action === "sendStems") {
+    if (!recordingId) {
+      await showError(context, "couldn't start stems — no recording was created for this work.");
+      return;
+    }
+    await runSendStems(context, run, workId, recordingId, workTitle).catch((e) =>
+      showError(context, e instanceof Error ? e.message : String(e)),
+    );
+  } else {
+    await runDeliver(context, run, workId, workTitle);
+  }
 }

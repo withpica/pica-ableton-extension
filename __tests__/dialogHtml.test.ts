@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escapeHtml, messageHtml, linkMessageHtml, finalReportHtml, type RegisterReport, pasteKeyHtml, duplicateChoiceHtml, titlePromptHtml, deliverHtml, deliverConfirmHtml } from "../src/dialogHtml";
+import { escapeHtml, messageHtml, linkMessageHtml, finalReportHtml, type RegisterReport, pasteKeyHtml, duplicateChoiceHtml, titlePromptHtml, deliverHtml, deliverConfirmHtml, stemsReportHtml } from "../src/dialogHtml";
 
 describe("escapeHtml", () => {
   it("escapes &, <, > and quotes", () => {
@@ -95,9 +95,9 @@ describe("finalReportHtml", () => {
     expect(finalReportHtml(base)).not.toContain("splice samples");
   });
 
-  it("renders a send-stems button and labels the recording link for the master upload", () => {
+  it("renders a log-stems button and labels the recording link for the master upload", () => {
     const html = finalReportHtml({ action: "registered", title: "X", workId: "w1", recordingId: "r1" });
-    expect(html).toContain("send stems");
+    expect(html).toContain("log stems →");
     expect(html).toContain("upload your master");
   });
 });
@@ -188,5 +188,64 @@ describe("finalReportHtml deliver button", () => {
     } as any);
     expect(html).toContain("'deliver'");
     expect(html).toContain("'sendStems'");
+  });
+});
+
+describe("rename: register report follow-on buttons", () => {
+  const base: RegisterReport = {
+    action: "registered",
+    title: "Wave",
+    workId: "w1",
+    recordingId: "r1",
+  };
+  it("uses 'log stems →' and 'share with →' (not the old labels)", () => {
+    const html = finalReportHtml(base);
+    expect(html).toContain("log stems →");
+    expect(html).toContain("share with →");
+    expect(html).not.toContain("send stems →");
+    expect(html).not.toContain("deliver this →");
+  });
+  it("keeps the internal bridge action ids stable", () => {
+    const html = finalReportHtml(base);
+    expect(html).toContain("'sendStems'");
+    expect(html).toContain("'deliver'");
+  });
+});
+
+describe("rename: deliverHtml is now 'share'", () => {
+  it("renders share title, body, and button", () => {
+    const html = deliverHtml("Wave");
+    expect(html).toContain('pica — share "Wave"');
+    expect(html).toContain("share this work with someone by email");
+    expect(html).toContain(">share</button>");
+    expect(html).not.toContain("pica — deliver");
+  });
+});
+
+describe("rename: deliverConfirmHtml is now 'sharing'", () => {
+  it("renders 'first time sharing with'", () => {
+    const html = deliverConfirmHtml("a@b.com");
+    expect(html).toContain("first time sharing with a@b.com");
+    expect(html).not.toContain("first time sending to");
+  });
+});
+
+describe("stemsReportHtml", () => {
+  const url = "https://withpica.com/inspect/recordings/r1";
+  it("renders the 'stems logged' title and the body", () => {
+    const html = stemsReportHtml("✓ drum loop\n✓ vocal loop", url);
+    expect(html).toContain("pica — stems logged");
+    expect(html).toContain("✓ drum loop");
+  });
+  it("renders the PICA link with a copy button", () => {
+    const html = stemsReportHtml("x", url);
+    expect(html).toContain(`href="${url}"`);
+    expect(html).toContain("navigator.clipboard");
+  });
+  it("offers a 'share with →' follow-on bridging 'share', plus close", () => {
+    const html = stemsReportHtml("x", url);
+    expect(html).toContain("share with →");
+    expect(html).toContain("'share'");
+    expect(html).toContain("close_and_send");
   });
 });
