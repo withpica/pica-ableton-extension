@@ -244,7 +244,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
         const masterOwnership = await captureOwnership(recordingId);
         const spliceLogged = await captureSplice(recordingId);
         const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, []), [], candidates);
-        await showReport(context, {
+        const action = await showReport(context, {
           action: "version",
           title: answer.title!,
           workId: e.existingWorkId,
@@ -253,6 +253,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           spliceLogged,
           credits,
         });
+        await runReportFollowOn(context, runWithClient, action, e.existingWorkId, recordingId, answer.title!);
         return undefined;
       }
 
@@ -283,7 +284,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
         }
         const spliceLogged = await captureSplice(recordingId);
         const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, existing), existing, candidates);
-        await showReport(context, {
+        const action = await showReport(context, {
           action: "existing",
           title: answer.title!,
           workId: e.existingWorkId,
@@ -292,6 +293,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           spliceLogged,
           credits,
         });
+        await runReportFollowOn(context, runWithClient, action, e.existingWorkId, recordingId, answer.title!);
         return undefined;
       }
 
@@ -351,32 +353,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     credits,
     writers,
   });
-  // The report is a webview modal. Opening the next modal (stem picker /
-  // deliver dialog) in the SAME turn the report closes silently no-ops on the
-  // host — that's why the in-flow "send stems →" / "deliver this →" buttons
-  // did nothing. Yield so the host releases the modal slot before the
-  // follow-up flow opens its own dialog.
-  if (reportAction === "sendStems" || reportAction === "deliver") {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  if (reportAction === "sendStems") {
-    if (!r.recordingId) {
-      // Shouldn't happen after a successful register — but surface it rather
-      // than vanish (the old silent no-op was indistinguishable from this).
-      await showError(context, "couldn't start stems — no recording was created for this work.");
-    } else {
-      // Surface a thrown stems failure instead of swallowing it. The register
-      // already succeeded, so a stems error must not look like a register
-      // failure — but it must not silently vanish either (per-stem errors show
-      // via runSendStems' own results dialog; this catches an outright throw).
-      await runSendStems(context, runWithClient, r.workId, r.recordingId, answer.title!).catch((e) =>
-        showError(context, e instanceof Error ? e.message : String(e)),
-      );
-    }
-  }
-  if (reportAction === "deliver") {
-    await runDeliver(context, runWithClient, r.workId, answer.title!);
-  }
+  await runReportFollowOn(context, runWithClient, reportAction, r.workId, r.recordingId, answer.title!);
 }
 
 const AUDIO_W = 420;
@@ -812,4 +789,32 @@ function showLink(context: ExtensionContext<"1.0.0">, title: string, body: strin
 /** The ONE consolidated end-of-flow report: lead line + per-step outcomes + the three links. */
 function showReport(context: ExtensionContext<"1.0.0">, report: RegisterReport): Promise<string> {
   return context.ui.showModalDialog(`data:text/html,${encodeURIComponent(finalReportHtml(report))}`, 360, REPORT_H);
+}
+
+/** Apply a register-report follow-on (log stems / share with), carrying work context.
+ *  Shared by the fresh-register path and both duplicate-path branches so the
+ *  report buttons work identically everywhere. */
+async function runReportFollowOn(
+  context: ExtensionContext<"1.0.0">,
+  run: ClientRunner,
+  action: string,
+  workId: string,
+  recordingId: string,
+  workTitle: string,
+): Promise<void> {
+  if (action !== "sendStems" && action !== "deliver") return;
+  // The report is a webview modal; the host won't open a second modal in the
+  // same turn the previous one closes — yield so the follow-up dialog opens.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  if (action === "sendStems") {
+    if (!recordingId) {
+      await showError(context, "couldn't start stems — no recording was created for this work.");
+      return;
+    }
+    await runSendStems(context, run, workId, recordingId, workTitle).catch((e) =>
+      showError(context, e instanceof Error ? e.message : String(e)),
+    );
+  } else {
+    await runDeliver(context, run, workId, workTitle);
+  }
 }
