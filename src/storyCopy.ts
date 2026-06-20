@@ -3,12 +3,17 @@
 /**
  * The single home for every in-DAW loading string (phase labels + the idle
  * rotation pool). Pure and host-independent so the node-env Vitest suite can
- * lock the voice — the same discipline as dialogHtml.ts. Strings here are
+ * lock the voice, the same discipline as dialogHtml.ts. Strings here are
  * passed to the host progress dialog's `update()`, never rendered as HTML.
  */
 
 export type StemPhase = "render" | "upload" | "queued";
 export type RegisterPhase = "introduce" | "register";
+
+/** The opening label shown while the stems dialog initialises. */
+export function stemsOpenerLabel(): string {
+  return "preparing your stems…";
+}
 
 /** A stem's current phase, data-aware. `sizeMb` shows only on upload. */
 export function stemPhaseLabel(
@@ -21,7 +26,7 @@ export function stemPhaseLabel(
     case "render":
       return `rendering ${name}, straight from the session…`;
     case "upload":
-      return sizeMb && sizeMb > 0
+      return (sizeMb ?? 0) > 0
         ? `${name}, onto your master… (${sizeMb} mb)`
         : `${name}, onto your master…`;
     case "queued":
@@ -76,8 +81,8 @@ export function rotateLine(lines: readonly string[], tick: number): string {
 
 /**
  * True if `s` honours the loading-copy voice: no em dash and all-lowercase.
- * Feed it static copy (IDLE_LINES) or labels built from lowercase data — the
- * test gate that stops the voice silently drifting.
+ * Feed it static copy (IDLE_LINES) or labels built from lowercase data,
+ * the test gate that stops the voice silently drifting.
  */
 export function obeysCopyInvariants(s: string): boolean {
   return !s.includes("—") && s === s.toLowerCase();

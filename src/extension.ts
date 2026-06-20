@@ -51,6 +51,7 @@ import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUp
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
 import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./pica/ownership";
 import {
+  stemsOpenerLabel,
   stemPhaseLabel,
   IDLE_LINES,
   deliverPhaseLabel,
@@ -440,7 +441,7 @@ async function runSendStems(
   const results: string[] = [];
 
   await context.ui.withinProgressDialog(
-    "preparing your stems…",
+    stemsOpenerLabel(),
     { progress: 0 },
     async (update, signal) => {
       const total = chosen.length;
@@ -479,7 +480,7 @@ async function runSendStems(
                 songEnd,
               ),
           );
-          storyTick += 2;
+          storyTick += 3;
           const size = statSync(wavPath).size;
           if (exceedsCap(size)) {
             results.push(
@@ -512,7 +513,7 @@ async function runSendStems(
                   ),
                 ),
             );
-            storyTick += 2;
+            storyTick += 3;
             await update(stemPhaseLabel("queued", label), uploadPct);
             results.push(`✓ ${label}`);
           }

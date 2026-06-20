@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  stemsOpenerLabel,
   stemPhaseLabel,
   registerPhaseLabel,
   deliverPhaseLabel,
@@ -11,6 +12,15 @@ import {
   rotateLine,
   obeysCopyInvariants,
 } from "../src/storyCopy";
+
+describe("stemsOpenerLabel", () => {
+  it("returns the expected opening string", () => {
+    expect(stemsOpenerLabel()).toBe("preparing your stems…");
+  });
+  it("obeys the loading-copy voice invariants", () => {
+    expect(obeysCopyInvariants(stemsOpenerLabel())).toBe(true);
+  });
+});
 
 describe("stemPhaseLabel", () => {
   it("renders the render phase with the stem name", () => {
