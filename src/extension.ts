@@ -340,14 +340,28 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     credits,
     writers,
   });
-  if (reportAction === "sendStems" && r.recordingId) {
-    // Surface a thrown stems failure instead of swallowing it. The register
-    // already succeeded, so a stems error must not look like a register
-    // failure — but it must not silently vanish either (per-stem errors show
-    // via runSendStems' own results dialog; this catches an outright throw).
-    await runSendStems(context, runWithClient, r.workId, r.recordingId).catch((e) =>
-      showError(context, e instanceof Error ? e.message : String(e)),
-    );
+  // The report is a webview modal. Opening the next modal (stem picker /
+  // deliver dialog) in the SAME turn the report closes silently no-ops on the
+  // host — that's why the in-flow "send stems →" / "deliver this →" buttons
+  // did nothing. Yield so the host releases the modal slot before the
+  // follow-up flow opens its own dialog.
+  if (reportAction === "sendStems" || reportAction === "deliver") {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  if (reportAction === "sendStems") {
+    if (!r.recordingId) {
+      // Shouldn't happen after a successful register — but surface it rather
+      // than vanish (the old silent no-op was indistinguishable from this).
+      await showError(context, "couldn't start stems — no recording was created for this work.");
+    } else {
+      // Surface a thrown stems failure instead of swallowing it. The register
+      // already succeeded, so a stems error must not look like a register
+      // failure — but it must not silently vanish either (per-stem errors show
+      // via runSendStems' own results dialog; this catches an outright throw).
+      await runSendStems(context, runWithClient, r.workId, r.recordingId).catch((e) =>
+        showError(context, e instanceof Error ? e.message : String(e)),
+      );
+    }
   }
   if (reportAction === "deliver") {
     await runDeliver(context, runWithClient, r.workId, answer.title!);
