@@ -50,7 +50,14 @@ import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } fro
 import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUpload";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
 import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./pica/ownership";
-import { stemPhaseLabel, IDLE_LINES, deliverPhaseLabel } from "./storyCopy";
+import {
+  stemPhaseLabel,
+  IDLE_LINES,
+  deliverPhaseLabel,
+  registerPhaseLabel,
+  creditsPhaseLabel,
+  writersPhaseLabel,
+} from "./storyCopy";
 import { withStory } from "./progress";
 
 const BASE_URL = "https://withpica.com";
@@ -164,7 +171,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     );
 
   const result = await context.ui.withinProgressDialog(
-    "Registering in PICA…",
+    registerPhaseLabel("introduce", answer.title!),
     { progress: 10 },
     async (update) => {
       // ensureIntroduced + registerSet are the register-phase network calls; run
@@ -172,9 +179,9 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
       // retries (the whole pair re-runs on retry). A DuplicateWorkError is not a
       // 401 → it propagates unchanged to the catch below.
       return runWithClient(async (c) => {
-        await update("Declaring agent identity…", 25);
+        await update(registerPhaseLabel("introduce", answer.title!), 25);
         await ensureIntroduced(c, liveVersion);
-        await update("Registering work + master recording…", 65);
+        await update(registerPhaseLabel("register", answer.title!), 65);
         return registerSet(c, {
           title: answer.title!,
           artistName: answer.artistName!,
@@ -731,7 +738,7 @@ async function runCreditsFlow(
 
   try {
     const outcomes = (await context.ui.withinProgressDialog(
-      "saving credits…",
+      creditsPhaseLabel(),
       { progress: 30 },
       async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing, candidates)),
     )) as CreditOutcome[];
@@ -769,7 +776,7 @@ async function runWritersFlow(
 
   try {
     const outcomes = (await context.ui.withinProgressDialog(
-      "saving writers…",
+      writersPhaseLabel(),
       { progress: 30 },
       async () => run((c) => saveWriters(c, workId, answer.names!)),
     )) as WriterOutcome[];
