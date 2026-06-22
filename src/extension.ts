@@ -43,10 +43,12 @@ import {
   deliverHtml,
   deliverConfirmHtml,
   stemsReportHtml,
+  shareStemsHtml,
   type RegisterReport,
   type StepResult,
 } from "./dialogHtml";
 import { deliverWork, isDeliverableEmail } from "./pica/deliver";
+import { mapAudioQueryToStems, selectionParam } from "./pica/shareStems";
 import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } from "./session/renderTargets";
 import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUpload";
 import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
@@ -94,8 +96,8 @@ export function activate(activation: ActivationContext): void {
       void showError(context, e instanceof Error ? e.message : String(e));
     });
   });
-  void context.ui.registerContextMenuAction("AudioTrack", "Log stems in PICA", SEND_STEMS_ID);
-  void context.ui.registerContextMenuAction("MidiTrack", "Log stems in PICA", SEND_STEMS_ID);
+  void context.ui.registerContextMenuAction("AudioTrack", "Log stems in pica", SEND_STEMS_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Log stems in pica", SEND_STEMS_ID);
 
   const DELIVER_ID = "pica.deliver";
   context.commands.registerCommand(DELIVER_ID, () => {
@@ -580,6 +582,41 @@ async function runDeliver(
   workId: string,
   workTitle: string,
 ): Promise<void> {
+  // Query audio files for this work and show a stem picker when there are multiple.
+  // Best-effort: any failure or empty result skips the picker (never blocks the share).
+  let includedFileIds: string[] | undefined;
+  try {
+    const audioRaw = await run((c) => c.callTool("pica_audio_query", { work_id: workId }));
+    const obj = audioRaw as { data?: unknown; items?: unknown } | null;
+    const rows = Array.isArray(audioRaw)
+      ? audioRaw
+      : Array.isArray(obj?.data)
+        ? (obj.data as unknown[])
+        : Array.isArray(obj?.items)
+          ? (obj.items as unknown[])
+          : [];
+    const audioRows = rows as Array<{ id: string; filename?: string; stem_label?: string | null; file_type?: string }>;
+    const stems = mapAudioQueryToStems(audioRows);
+    if (stems.length > 1) {
+      const pickerRaw = await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(shareStemsHtml(stems))}`,
+        DELIVER_W,
+        STEM_PICKER_H,
+      );
+      const pickerAns = safeParse(pickerRaw) as { cancelled?: boolean; ids?: string[] };
+      if (pickerAns.cancelled) return;
+      const chosen = pickerAns.ids ?? [];
+      if (chosen.length === 0) {
+        await showError(context, "select at least one stem, or cancel.");
+        return;
+      }
+      includedFileIds = selectionParam(stems.map((s) => s.id), chosen);
+    }
+    // stems.length <= 1: share all (includedFileIds stays undefined)
+  } catch {
+    // best-effort: skip the picker on any query error
+  }
+
   const raw = await context.ui.showModalDialog(
     `data:text/html,${encodeURIComponent(deliverHtml(workTitle))}`,
     DELIVER_W,
@@ -600,7 +637,7 @@ async function runDeliver(
     { progress: 40 },
     async () =>
       run((c) =>
-        deliverWork({ client: c }, { workId, email, note, allowDownload }),
+        deliverWork({ client: c }, { workId, email, note, allowDownload, includedFileIds }),
       ),
   )) as Awaited<ReturnType<typeof deliverWork>>;
 
@@ -619,7 +656,7 @@ async function runDeliver(
         run((cl) =>
           deliverWork(
             { client: cl },
-            { workId, email, note, allowDownload, confirmFirstExternal: true },
+            { workId, email, note, allowDownload, confirmFirstExternal: true, includedFileIds },
           ),
         ),
     )) as Awaited<ReturnType<typeof deliverWork>>;
@@ -690,6 +727,7 @@ const REPORT_H = 540;
 const DELIVER_W = 460;
 const DELIVER_H = 400;
 const DELIVER_CONFIRM_H = 240;
+const STEM_PICKER_H = 320;
 
 /** A reconnect-aware runner: builds a client (possibly from a fresh key) and runs `fn`. */
 type ClientRunner = <T>(fn: (c: PicaMcpClient) => Promise<T>) => Promise<T>;

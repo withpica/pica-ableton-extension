@@ -1,6 +1,7 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
 import type { MasterOwnershipOutcome } from "./pica/ownership";
+import type { StemChoice } from "./pica/shareStems";
 import { summarizeCredits, type CreditOutcome } from "./pica/credits";
 import { summarizeWriters, type WriterOutcome } from "./pica/writers";
 
@@ -146,6 +147,41 @@ export function deliverHtml(workTitle: string): string {
     `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></textarea></div>` +
     `<div style="margin-top:10px"><label style="font-size:12px"><input type="checkbox" id="d" checked> allow download of attached audio</label></div>` +
     `<div style="margin-top:12px"><button onclick="${escapeHtml(sendJs)}">share</button> ` +
+    `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
+  );
+}
+
+/** Stem picker: one include/skip row per stem, before the deliver dialog.
+ *  Bridges {ids: string[]} (the chosen stem ids) or {cancelled:true}. */
+export function shareStemsHtml(stems: StemChoice[]): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const shareJs = bridgeSend(
+    "JSON.stringify({ids:(function(){" +
+      "var ids=[];" +
+      "document.querySelectorAll('.stem-row').forEach(function(row){" +
+      "if(row.querySelector('select').value==='include')ids.push(row.dataset.id);" +
+      "});" +
+      "return ids;" +
+      "}())})",
+  );
+  const rows = stems
+    .map(
+      (s) =>
+        `<div class="stem-row" data-id="${escapeHtml(s.id)}">` +
+        `<select style="background:#1A1A1A;color:#EDEDED;border:1px solid #444;padding:4px;font:12px ui-monospace,Menlo,monospace">` +
+        `<option value="include">include</option>` +
+        `<option value="skip">skip</option>` +
+        `</select>` +
+        ` ${escapeHtml(s.label)}` +
+        ` <span style="color:#888;font-size:11px">${escapeHtml(s.fileType)}</span>` +
+        `</div>`,
+    )
+    .join("");
+  return (
+    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<div style="color:#B87333;margin-bottom:8px">pica: which stems to share</div>` +
+    `${rows}` +
+    `<div style="margin-top:12px"><button onclick="${escapeHtml(shareJs)}">share</button> ` +
     `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
   );
 }
