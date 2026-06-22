@@ -12,6 +12,7 @@ export interface DeliverArgs {
   note?: string;
   allowDownload: boolean;
   confirmFirstExternal?: boolean;
+  includedFileIds?: string[];
 }
 
 export type DeliverResult =
@@ -44,6 +45,9 @@ export async function deliverWork(deps: DeliverDeps, args: DeliverArgs): Promise
     note: args.note?.trim() || undefined,
     scope: args.allowDownload ? "view+download" : "view",
     confirm_first_external_send: args.confirmFirstExternal ? true : undefined,
+    ...(args.includedFileIds && args.includedFileIds.length > 0
+      ? { included_file_ids: args.includedFileIds }
+      : {}),
   };
 
   let r: any;
