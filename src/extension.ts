@@ -574,7 +574,8 @@ async function runSendStemsStandalone(context: ExtensionContext<"1.0.0">, hostAp
 /**
  * Stage 5: send a registered work to a recipient by email via pica_share_send.
  * Shared by the in-flow report hook and the standalone command. Surfaces every
- * failure — never swallows (cf. the stems hook's .catch(() => undefined)).
+ * failure to the user via showError, like the stems follow-on (runReportFollowOn
+ * now reports a stems failure rather than swallowing it).
  */
 async function runDeliver(
   context: ExtensionContext<"1.0.0">,
