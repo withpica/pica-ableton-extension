@@ -5,6 +5,12 @@ import interfaceHtml from "../ui/interface.html";
 import creditsHtml from "../ui/credits.html";
 import writersHtml from "../ui/writers.html";
 import audioHtml from "../ui/audio.html";
+import { injectFlatStyle } from "./dialogStyles";
+
+const interfaceHtmlFlat = injectFlatStyle(interfaceHtml);
+const creditsHtmlFlat = injectFlatStyle(creditsHtml);
+const writersHtmlFlat = injectFlatStyle(writersHtml);
+const audioHtmlFlat = injectFlatStyle(audioHtml);
 import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { PicaMcpClient } from "./pica/mcpClient";
@@ -136,7 +142,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   // 2. Confirm-and-edit panel. Title + artist are user-entered (the Set has neither).
   const prefillJson = JSON.stringify({ summary, key: derivedKey, workType: "song" }).replace(/</g, "\\u003c");
   const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
-  const injected = interfaceHtml.replace(
+  const injected = interfaceHtmlFlat.replace(
     "</head>",
     `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
   );
@@ -398,7 +404,7 @@ async function runSendStems(
   const targets = deriveRenderTargets(audioTracks);
   const masterUrl = `${BASE_URL}/inspect/recordings/${recordingId}`;
 
-  const injected = audioHtml.replace(
+  const injected = audioHtmlFlat.replace(
     "</head>",
     `<script>window.__PICA_STEMS__ = ${JSON.stringify({
       stems: targets.map((t, i) => ({ index: i, name: t.name, label: t.label })),
@@ -744,7 +750,7 @@ async function runCreditsFlow(
 ): Promise<StepResult<CreditOutcome>> {
   const prefillJson = JSON.stringify({ tree: prefillNodes }).replace(/</g, "\\u003c");
   const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
-  const injected = creditsHtml.replace(
+  const injected = creditsHtmlFlat.replace(
     "</head>",
     `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
   );
@@ -782,7 +788,7 @@ async function runWritersFlow(
   candidates: PersonCandidate[],
 ): Promise<StepResult<WriterOutcome>> {
   const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
-  const injected = writersHtml.replace(
+  const injected = writersHtmlFlat.replace(
     "</head>",
     `<script>window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
   );
