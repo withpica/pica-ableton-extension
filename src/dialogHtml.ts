@@ -4,6 +4,7 @@ import type { MasterOwnershipOutcome } from "./pica/ownership";
 import type { StemChoice } from "./pica/shareStems";
 import { summarizeCredits, type CreditOutcome } from "./pica/credits";
 import { summarizeWriters, type WriterOutcome } from "./pica/writers";
+import { withFlatStyle } from "./dialogStyles";
 
 /**
  * Pure HTML builders for the extension's modal dialogs (host-independent,
@@ -31,20 +32,17 @@ function bridgeSend(payloadExpr: string): string {
 
 const CLOSE_JS = bridgeSend("'ok'");
 
-const BASE_STYLE =
+// Inline body style for builders not yet migrated to the flat system (Task 3+).
+const LEGACY_BODY_STYLE =
   "margin:0;background:#0A0A0A;color:#EDEDED;font:13px ui-monospace,Menlo,monospace;" +
   "padding:18px;white-space:pre-wrap;-webkit-user-select:text;user-select:text";
 
-function closeButton(): string {
-  return `<div style="margin-top:16px"><button onclick="${CLOSE_JS}">close</button></div>`;
-}
-
 /** Plain message dialog (errors, info without a link). */
 export function messageHtml(title: string, body: string): string {
-  return (
-    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">${escapeHtml(title)}</div>` +
-    `${escapeHtml(body)}${closeButton()}`
+  return withFlatStyle(
+    `<div class="h">${escapeHtml(title)}</div>` +
+    `<div class="hint">${escapeHtml(body)}</div>` +
+    `<div class="actions"><button onclick="${CLOSE_JS}">close</button></div>`,
   );
 }
 
@@ -66,14 +64,13 @@ export function linkMessageHtml(title: string, body: string, url: string): strin
     `function ok(){b.textContent='copied';setTimeout(function(){b.textContent='copy link'},1500)}` +
     `if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(u.textContent).then(ok,fallback)}else{fallback()}` +
     `function fallback(){var r=document.createRange();r.selectNodeContents(u);var s=getSelection();s.removeAllRanges();s.addRange(r);try{document.execCommand('copy');ok()}catch(e){}}`;
-  return (
-    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">${escapeHtml(title)}</div>` +
-    `${escapeHtml(body)}` +
-    `<div style="margin-top:12px;word-break:break-all">` +
-    `<a id="u" href="${safeUrl}" target="_blank" style="color:#B87333">${safeUrl}</a></div>` +
-    `<div style="margin-top:12px"><button onclick="${escapeHtml(copyJs)}">copy link</button> ` +
-    `<button onclick="${CLOSE_JS}">close</button></div>`
+  return withFlatStyle(
+    `<div class="h">${escapeHtml(title)}</div>` +
+    `<div class="hint">${escapeHtml(body)}</div>` +
+    `<div class="hint" style="margin-top:10px;word-break:break-all">` +
+    `<a id="u" href="${safeUrl}" target="_blank">${safeUrl}</a></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(copyJs)}">copy link</button> ` +
+    `<button onclick="${CLOSE_JS}">close</button></div>`,
   );
 }
 
@@ -82,7 +79,7 @@ export function linkMessageHtml(title: string, body: string, url: string): strin
 export function stemsReportHtml(body: string, url: string): string {
   const safeUrl = escapeHtml(url);
   return (
-    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<!doctype html><meta charset="utf-8"><body style="${LEGACY_BODY_STYLE}">` +
     `<div style="color:#B87333;margin-bottom:8px">pica — stems logged</div>` +
     `${escapeHtml(body)}` +
     `<div style="margin-top:12px;word-break:break-all">` +
@@ -99,15 +96,13 @@ export function pasteKeyHtml(): string {
     "JSON.stringify({apiKey:document.getElementById('k').value.trim()})",
   );
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
-  return (
-    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">pica — paste your connection key</div>` +
-    `paste the withpica_live_… key you copied from the browser:` +
-    `<div style="margin-top:10px"><input id="k" placeholder="withpica_live_…" ` +
-    `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;` +
-    `border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></div>` +
-    `<div style="margin-top:12px"><button onclick="${escapeHtml(connectJs)}">connect</button> ` +
-    `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
+  return withFlatStyle(
+    `<div class="h">pica — paste your connection key</div>` +
+    `<div class="hint">paste the withpica_live_… key you copied from the browser:</div>` +
+    `<div class="label">connection key</div>` +
+    `<input class="input" id="k" placeholder="withpica_live_…">` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(connectJs)}">connect</button></div>`,
   );
 }
 
@@ -117,14 +112,13 @@ export function titlePromptHtml(
 ): string {
   const confirmJs = bridgeSend("JSON.stringify({title:document.getElementById('t').value.trim()})");
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
-  return (
-    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">pica — which work?</div>` +
-    `${escapeHtml(subtitle)}` +
-    `<div style="margin-top:10px"><input id="t" placeholder="work title" ` +
-    `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></div>` +
-    `<div style="margin-top:12px"><button onclick="${escapeHtml(confirmJs)}">find</button> ` +
-    `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
+  return withFlatStyle(
+    `<div class="h">pica — which work?</div>` +
+    `<div class="hint">${escapeHtml(subtitle)}</div>` +
+    `<div class="label">work title</div>` +
+    `<input class="input" id="t" placeholder="work title">` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(confirmJs)}">find</button></div>`,
   );
 }
 
@@ -137,17 +131,17 @@ export function deliverHtml(workTitle: string): string {
       "note:document.getElementById('n').value.trim()," +
       "allowDownload:document.getElementById('d').checked})",
   );
-  return (
-    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">pica — share "${escapeHtml(workTitle)}"</div>` +
-    `share this work with someone by email. they get a private link (revocable, expires in 30 days).` +
-    `<div style="margin-top:10px"><input id="e" placeholder="email address" ` +
-    `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></div>` +
-    `<div style="margin-top:10px"><textarea id="n" placeholder="optional message" rows="3" ` +
-    `style="width:100%;box-sizing:border-box;background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:8px;font:12px ui-monospace,Menlo,monospace"></textarea></div>` +
-    `<div style="margin-top:10px"><label style="font-size:12px"><input type="checkbox" id="d" checked> allow download of attached audio</label></div>` +
-    `<div style="margin-top:12px"><button onclick="${escapeHtml(sendJs)}">share</button> ` +
-    `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
+  return withFlatStyle(
+    `<div class="h">pica / share "${escapeHtml(workTitle)}"</div>` +
+    `<div class="hint">share this work with someone by email. they get a private link, revocable, expires in 30 days.</div>` +
+    `<div class="label">recipient</div>` +
+    `<input class="input" id="e" placeholder="email address">` +
+    `<div class="label">message (optional)</div>` +
+    `<textarea class="textarea" id="n" rows="3" placeholder="add a note"></textarea>` +
+    `<label class="check"><input type="checkbox" id="d" checked> allow download of attached audio</label>` +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(sendJs)}">share</button></div>`,
   );
 }
 
@@ -178,7 +172,7 @@ export function shareStemsHtml(stems: StemChoice[]): string {
     )
     .join("");
   return (
-    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<!doctype html><meta charset="utf-8"><body style="${LEGACY_BODY_STYLE}">` +
     `<div style="color:#B87333;margin-bottom:8px">pica: which stems to share</div>` +
     `${rows}` +
     `<div style="margin-top:12px"><button onclick="${escapeHtml(shareJs)}">share</button> ` +
@@ -190,12 +184,11 @@ export function shareStemsHtml(stems: StemChoice[]): string {
 export function deliverConfirmHtml(email: string): string {
   const yesJs = bridgeSend("JSON.stringify({confirmed:true})");
   const noJs = bridgeSend("JSON.stringify({cancelled:true})");
-  return (
-    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">pica — confirm recipient</div>` +
-    `first time sharing with ${escapeHtml(email)}. is that address correct?` +
-    `<div style="margin-top:12px"><button onclick="${escapeHtml(yesJs)}">yes, send</button> ` +
-    `<button onclick="${escapeHtml(noJs)}">cancel</button></div>`
+  return withFlatStyle(
+    `<div class="h">pica — confirm recipient</div>` +
+    `<div class="hint">first time sharing with ${escapeHtml(email)}. is that address correct?</div>` +
+    `<div class="actions"><button onclick="${escapeHtml(noJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(yesJs)}">yes, send</button></div>`,
   );
 }
 
@@ -211,7 +204,7 @@ export function duplicateChoiceHtml(title: string, versionTypes: readonly string
     .map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`)
     .join("");
   return (
-    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<!doctype html><meta charset="utf-8"><body style="${LEGACY_BODY_STYLE}">` +
     `<div style="color:#B87333;margin-bottom:8px">pica — already registered</div>` +
     `a work titled "${escapeHtml(title)}" already exists in your catalog.` +
     `<div style="margin-top:14px"><button onclick="${escapeHtml(existingJs)}">add credits to the existing recording</button></div>` +
@@ -307,12 +300,12 @@ export function finalReportHtml(report: RegisterReport): string {
     reportLinkRow("view the recording (upload your master here)", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
     reportLinkRow("open your catalog", `${BASE_URL}/inspect`, 2);
   return (
-    `<!doctype html><meta charset="utf-8"><body style="${BASE_STYLE}">` +
+    `<!doctype html><meta charset="utf-8"><body style="${LEGACY_BODY_STYLE}">` +
     `<div style="color:#B87333;margin-bottom:8px">pica — registered</div>` +
     `${escapeHtml(lines.join("\n"))}` +
     `<div style="margin-top:14px">${links}</div>` +
     `<div style="margin-top:14px"><button onclick="${bridgeSend("'sendStems'")}">log stems →</button></div>` +
     `<div style="margin-top:8px"><button onclick="${bridgeSend("'deliver'")}">share with →</button></div>` +
-    closeButton()
+    `<div style="margin-top:16px"><button onclick="${CLOSE_JS}">close</button></div>`
   );
 }

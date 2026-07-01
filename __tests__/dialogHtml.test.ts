@@ -215,7 +215,7 @@ describe("rename: register report follow-on buttons", () => {
 describe("rename: deliverHtml is now 'share'", () => {
   it("renders share title, body, and button", () => {
     const html = deliverHtml("Wave");
-    expect(html).toContain('pica — share "Wave"');
+    expect(html).toContain('pica / share "Wave"');
     expect(html).toContain("share this work with someone by email");
     expect(html).toContain(">share</button>");
     expect(html).not.toContain("pica — deliver");
@@ -277,6 +277,63 @@ describe("shareStemsHtml", () => {
     // share button posts ids array
     expect(html).toContain("ids");
     expect(html).toContain("row.dataset.id");
+  });
+});
+
+describe("flat form dialogs", () => {
+  const FLAT_STYLE_MARKER = "--copper:#B87333";
+
+  it("deliverHtml is flat + keeps its field ids and share payload", () => {
+    const h = deliverHtml('a "b" work');
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain('class="h"');
+    expect(h).toContain('id="e"');
+    expect(h).toContain('id="n"');
+    expect(h).toContain('id="d"');
+    expect(h).toContain("document.getElementById('e').value.trim()");
+    expect(h).toContain("allowDownload:document.getElementById('d').checked");
+    expect(h).toContain("&quot;b&quot;");
+    expect(h).not.toContain("#1A1A1A");
+  });
+
+  it("pasteKeyHtml keeps #k + apiKey payload", () => {
+    const h = pasteKeyHtml();
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain('id="k"');
+    expect(h).toContain("apiKey:document.getElementById('k').value.trim()");
+    expect(h).not.toContain("#1A1A1A");
+  });
+
+  it("titlePromptHtml keeps #t + title payload", () => {
+    const h = titlePromptHtml();
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain("title:document.getElementById('t').value.trim()");
+    expect(h).not.toContain("#1A1A1A");
+  });
+
+  it("linkMessageHtml keeps the #u anchor + copy", () => {
+    const h = linkMessageHtml("t", "b", "https://x/y");
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain('id="u"');
+    expect(h).toContain("https://x/y");
+    expect(h).not.toContain("#1A1A1A");
+  });
+
+  it("messageHtml is flat + keeps body + close", () => {
+    const h = messageHtml("pica — error", "something went wrong");
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain('class="h"');
+    expect(h).toContain("something went wrong");
+    expect(h).not.toContain("#1A1A1A");
+  });
+
+  it("deliverConfirmHtml is flat + keeps confirmed/cancelled payloads", () => {
+    const h = deliverConfirmHtml("a@b.com");
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain('class="h"');
+    expect(h).toContain("confirmed:true");
+    expect(h).toContain("cancelled:true");
+    expect(h).not.toContain("#1A1A1A");
   });
 });
 
