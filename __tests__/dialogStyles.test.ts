@@ -8,7 +8,8 @@ describe("FLAT_STYLE", () => {
     expect(FLAT_STYLE).toContain("--copper:#B87333");
     expect(FLAT_STYLE).toContain("#0A0A0A");
     for (const cls of [".h", ".hint", ".label", ".input", ".textarea", ".select", ".btn", ".btn-primary", ".divider", ".actions", ".row", ".kv", ".link",
-      ".stem-row", ".credit-row", ".writer-row", ".instrument", ".who"]) {
+      ".stem-row", ".credit-row", ".writer-row", ".instrument", ".who",
+      ".caret", ".caret.leaf", ".remove", ".add"]) {
       expect(FLAT_STYLE).toContain(cls);
     }
     expect(FLAT_STYLE).not.toContain("border-radius");

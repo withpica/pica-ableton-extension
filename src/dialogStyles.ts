@@ -3,8 +3,8 @@
 /**
  * The one flat style system for every in-DAW dialog, matching PICA /inspect.
  * Carries the token vars + reusable classes AND selectors for the classes the
- * ui/*.html inline JS emits (.stem-row/.credit-row/.writer-row/.instrument/.who)
- * so those JS-built rows restyle with no JS change.
+ * ui/*.html inline JS emits (.stem-row/.credit-row/.writer-row/.instrument/.who/
+ * .caret/.caret.leaf/.remove/.add) so those JS-built rows restyle with no JS change.
  */
 export const FLAT_STYLE =
   "<style>" +
@@ -33,7 +33,7 @@ export const FLAT_STYLE =
   ".row,.stem-row,.credit-row,.writer-row{display:flex;align-items:center;gap:10px;padding:9px 0;" +
   "border-top:1px solid var(--gridline)}" +
   ".row:first-of-type,.stem-row:first-of-type,.writer-row:first-of-type{border-top:none}" +
-  ".row .name{flex:1}.row .type,.type{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.06em}" +
+  ".row .name,.stem-row .name{flex:1}.row .type,.type{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.06em}" +
   ".row .select,.stem-row select{width:96px;padding:4px 6px;flex:none}" +
   ".instrument{flex:none;width:150px}.who{flex:1}" +
   ".children{margin-left:16px;border-left:1px solid var(--gridline);padding-left:10px}" +
@@ -42,6 +42,12 @@ export const FLAT_STYLE =
   ".kv .v{flex:1;color:var(--ink)}" +
   "a,.link{color:var(--copper);text-decoration:none;word-break:break-all}a:hover,.link:hover{text-decoration:underline}" +
   "datalist{display:none}" +
+  ".caret{background:transparent;border:none;color:var(--muted);cursor:pointer;width:16px;padding:0;flex:none;font-size:11px}" +
+  ".caret.leaf{visibility:hidden}" +
+  ".remove{border:none;background:transparent;color:var(--muted);padding:0 4px;font-size:14px;flex:none;cursor:pointer}" +
+  ".remove:hover{color:var(--copper)}" +
+  ".add{width:100%;border:1px dashed var(--gridline);background:transparent;color:var(--muted);padding:7px;margin-top:2px;cursor:pointer}" +
+  ".add:hover{border-color:var(--copper);color:var(--copper)}" +
   "</style>";
 
 export function withFlatStyle(bodyHtml: string): string {
