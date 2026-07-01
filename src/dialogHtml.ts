@@ -323,7 +323,7 @@ export function finalReportHtml(report: RegisterReport): string {
     reportLinkRow("open your catalog", `${BASE_URL}/inspect`, 2);
   return withFlatStyle(
     `<div class="h">pica / registered</div>` +
-    `<div class="hint">${kvRows.join("")}</div>` +
+    kvRows.join("") +
     links +
     `<div class="divider"></div>` +
     `<div class="actions">` +
