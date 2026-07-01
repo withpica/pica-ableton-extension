@@ -140,8 +140,10 @@ describe("duplicateChoiceHtml", () => {
 
 describe("titlePromptHtml", () => {
   it("renders a single title input and the prompt heading", () => {
-    expect(titlePromptHtml()).toContain('id="t"');
-    expect(titlePromptHtml()).toContain("which work?");
+    const h = titlePromptHtml();
+    expect(h).toContain('id="t"');
+    expect(h).toContain('class="h"');
+    expect(h).toContain("which work?");
   });
 });
 

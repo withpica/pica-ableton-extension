@@ -97,7 +97,7 @@ export function pasteKeyHtml(): string {
   );
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
   return withFlatStyle(
-    `<div class="h">pica — paste your connection key</div>` +
+    `<div class="h">pica / paste your connection key</div>` +
     `<div class="hint">paste the withpica_live_… key you copied from the browser:</div>` +
     `<div class="label">connection key</div>` +
     `<input class="input" id="k" placeholder="withpica_live_…">` +
@@ -113,7 +113,7 @@ export function titlePromptHtml(
   const confirmJs = bridgeSend("JSON.stringify({title:document.getElementById('t').value.trim()})");
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
   return withFlatStyle(
-    `<div class="h">pica — which work?</div>` +
+    `<div class="h">pica / which work?</div>` +
     `<div class="hint">${escapeHtml(subtitle)}</div>` +
     `<div class="label">work title</div>` +
     `<input class="input" id="t" placeholder="work title">` +
@@ -185,7 +185,7 @@ export function deliverConfirmHtml(email: string): string {
   const yesJs = bridgeSend("JSON.stringify({confirmed:true})");
   const noJs = bridgeSend("JSON.stringify({cancelled:true})");
   return withFlatStyle(
-    `<div class="h">pica — confirm recipient</div>` +
+    `<div class="h">pica / confirm recipient</div>` +
     `<div class="hint">first time sharing with ${escapeHtml(email)}. is that address correct?</div>` +
     `<div class="actions"><button onclick="${escapeHtml(noJs)}">cancel</button> ` +
     `<button class="btn-primary" onclick="${escapeHtml(yesJs)}">yes, send</button></div>`,
