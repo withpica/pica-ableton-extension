@@ -41,8 +41,16 @@ export function computeSongEnd(tracks: TrackLike[]): number {
 }
 
 export function deriveRenderTargets<T extends TrackLike>(audioTracks: T[]): RenderTarget<T>[] {
+  // Live audio tracks frequently share a name (default "Audio", and common
+  // after freeze & flatten), so N tracks would otherwise all upload as the
+  // same "<name>.wav" and collapse a real multi-stem session downstream.
+  // Suffix an index on repeats so every stem gets a distinct name at capture.
+  const counts = new Map<string, number>();
   return audioTracks.map((track) => {
-    const name = (track.name ?? "").trim() || "untitled";
+    const base = (track.name ?? "").trim() || "untitled";
+    const n = (counts.get(base) ?? 0) + 1;
+    counts.set(base, n);
+    const name = n > 1 ? `${base} ${n}` : base;
     return { track, name, include: true, label: name };
   });
 }
