@@ -32,10 +32,6 @@ function bridgeSend(payloadExpr: string): string {
 
 const CLOSE_JS = bridgeSend("'ok'");
 
-// Inline body style for builders not yet migrated to the flat system (Task 3+).
-const LEGACY_BODY_STYLE =
-  "margin:0;background:#0A0A0A;color:#EDEDED;font:13px ui-monospace,Menlo,monospace;" +
-  "padding:18px;white-space:pre-wrap;-webkit-user-select:text;user-select:text";
 
 /** Plain message dialog (errors, info without a link). */
 export function messageHtml(title: string, body: string): string {
@@ -78,15 +74,17 @@ export function linkMessageHtml(title: string, body: string, url: string): strin
  *  "share with →" follow-on (bridges 'share') + close. */
 export function stemsReportHtml(body: string, url: string): string {
   const safeUrl = escapeHtml(url);
-  return (
-    `<!doctype html><meta charset="utf-8"><body style="${LEGACY_BODY_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">pica — stems logged</div>` +
-    `${escapeHtml(body)}` +
-    `<div style="margin-top:12px;word-break:break-all">` +
-    `<a id="u" href="${safeUrl}" target="_blank" style="color:#B87333">${safeUrl}</a></div>` +
-    `<div style="margin-top:12px"><button onclick="${escapeHtml(copyLinkJs("u"))}">copy link</button></div>` +
-    `<div style="margin-top:14px"><button onclick="${bridgeSend("'share'")}">share with →</button></div>` +
-    `<div style="margin-top:8px"><button onclick="${CLOSE_JS}">close</button></div>`
+  return withFlatStyle(
+    `<div class="h">pica / stems logged</div>` +
+    `<div class="hint">${escapeHtml(body)}</div>` +
+    `<div class="kv" style="margin-top:10px">` +
+    `<span class="v"><a id="u" href="${safeUrl}" target="_blank">${safeUrl}</a></span>` +
+    `<button onclick="${escapeHtml(copyLinkJs("u"))}" style="margin-left:8px">copy link</button></div>` +
+    `<div class="divider"></div>` +
+    `<div class="actions">` +
+    `<button onclick="${CLOSE_JS}">close</button> ` +
+    `<button class="btn-primary" onclick="${bridgeSend("'share'")}">share with →</button>` +
+    `</div>`,
   );
 }
 
@@ -162,21 +160,21 @@ export function shareStemsHtml(stems: StemChoice[]): string {
     .map(
       (s) =>
         `<div class="stem-row" data-id="${escapeHtml(s.id)}">` +
-        `<select style="background:#1A1A1A;color:#EDEDED;border:1px solid #444;padding:4px;font:12px ui-monospace,Menlo,monospace">` +
-        `<option value="include">include</option>` +
-        `<option value="skip">skip</option>` +
-        `</select>` +
-        ` ${escapeHtml(s.label)}` +
-        ` <span style="color:#888;font-size:11px">${escapeHtml(s.fileType)}</span>` +
+        `<span class="name">${escapeHtml(s.label)}</span>` +
+        `<span class="type">${escapeHtml(s.fileType)}</span>` +
+        `<select><option value="include">include</option><option value="skip">skip</option></select>` +
         `</div>`,
     )
     .join("");
-  return (
-    `<!doctype html><meta charset="utf-8"><body style="${LEGACY_BODY_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">pica: which stems to share</div>` +
+  return withFlatStyle(
+    `<div class="h">pica / which stems to share</div>` +
+    `<div class="hint">choose which stems to include in the share:</div>` +
     `${rows}` +
-    `<div style="margin-top:12px"><button onclick="${escapeHtml(shareJs)}">share</button> ` +
-    `<button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
+    `<div class="divider"></div>` +
+    `<div class="actions">` +
+    `<button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(shareJs)}">share</button>` +
+    `</div>`,
   );
 }
 
@@ -203,15 +201,18 @@ export function duplicateChoiceHtml(title: string, versionTypes: readonly string
   const options = versionTypes
     .map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`)
     .join("");
-  return (
-    `<!doctype html><meta charset="utf-8"><body style="${LEGACY_BODY_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">pica — already registered</div>` +
-    `a work titled "${escapeHtml(title)}" already exists in your catalog.` +
-    `<div style="margin-top:14px"><button onclick="${escapeHtml(existingJs)}">add credits to the existing recording</button></div>` +
-    `<div style="margin-top:14px">register as a new version: ` +
-    `<select id="vt" style="background:#1A1A1A;color:#EDEDED;border:1px solid #333;padding:4px">${options}</select> ` +
-    `<button onclick="${escapeHtml(newVersionJs)}">register version</button></div>` +
-    `<div style="margin-top:14px"><button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`
+  return withFlatStyle(
+    `<div class="h">pica / already registered</div>` +
+    `<div class="hint">a work titled &quot;${escapeHtml(title)}&quot; already exists in your catalog.</div>` +
+    `<div style="margin-top:14px">` +
+    `<button style="width:100%;text-align:left" onclick="${escapeHtml(existingJs)}">add credits to the existing recording</button>` +
+    `</div>` +
+    `<div class="kv" style="margin-top:10px;align-items:center">` +
+    `<select id="vt" class="select" style="width:auto;margin-right:8px">${options}</select>` +
+    `<button class="btn-primary" onclick="${escapeHtml(newVersionJs)}">register version</button>` +
+    `</div>` +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button></div>`,
   );
 }
 
@@ -271,41 +272,64 @@ function writersLine(w?: StepResult<WriterOutcome>): string | null {
   return summarizeWriters(w.outcomes) || "writers: none added.";
 }
 
-/** One link row: friendly anchor + selectable URL span + a copy button. */
+/** One link row: friendly anchor + selectable URL span + a copy button (flat .kv style). */
 function reportLinkRow(label: string, url: string, idx: number): string {
   const safeUrl = escapeHtml(url);
   const id = `u${idx}`;
   return (
-    `<div style="margin-top:10px;word-break:break-all">` +
-    `<a href="${safeUrl}" target="_blank" style="color:#B87333">${escapeHtml(label)}</a> ` +
-    `<span id="${id}" style="color:#888">${safeUrl}</span> ` +
-    `<button onclick="${escapeHtml(copyLinkJs(id))}">copy</button></div>`
+    `<div class="kv">` +
+    `<span class="k">${escapeHtml(label)}</span>` +
+    `<span class="v"><a href="${safeUrl}" target="_blank" class="link"><span id="${id}">${safeUrl}</span></a> ` +
+    `<button onclick="${escapeHtml(copyLinkJs(id))}">copy</button></span>` +
+    `</div>`
   );
 }
 
 /** The ONE consolidated report shown at the end of the register flow. */
 export function finalReportHtml(report: RegisterReport): string {
-  const lines: string[] = [leadLine(report.action, report.title)];
+  const kvRows: string[] = [];
+  kvRows.push(
+    `<div class="kv"><span class="k">status</span><span class="v">${escapeHtml(leadLine(report.action, report.title))}</span></div>`,
+  );
   const own = ownershipLine(report.masterOwnership);
-  if (own) lines.push(own);
+  if (own) {
+    const colonIdx = own.indexOf(":");
+    const k = colonIdx >= 0 ? own.slice(0, colonIdx) : "ownership";
+    const v = colonIdx >= 0 ? own.slice(colonIdx + 2) : own;
+    kvRows.push(`<div class="kv"><span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(v)}</span></div>`);
+  }
   const cr = creditsLine(report.credits);
-  if (cr) lines.push(cr);
+  if (cr) {
+    const colonIdx = cr.indexOf(":");
+    const k = colonIdx >= 0 ? cr.slice(0, colonIdx) : "credits";
+    const v = colonIdx >= 0 ? cr.slice(colonIdx + 2) : cr;
+    kvRows.push(`<div class="kv"><span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(v)}</span></div>`);
+  }
   const wr = writersLine(report.writers);
-  if (wr) lines.push(wr);
+  if (wr) {
+    const colonIdx = wr.indexOf(":");
+    const k = colonIdx >= 0 ? wr.slice(0, colonIdx) : "writers";
+    const v = colonIdx >= 0 ? wr.slice(colonIdx + 2) : wr;
+    kvRows.push(`<div class="kv"><span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(v)}</span></div>`);
+  }
   if (report.spliceLogged && report.spliceLogged > 0) {
-    lines.push(`splice samples: ${report.spliceLogged} logged (royalty-free — no clearance needed).`);
+    kvRows.push(
+      `<div class="kv"><span class="k">samples</span><span class="v">${report.spliceLogged} logged (royalty-free, no clearance needed).</span></div>`,
+    );
   }
   const links =
     reportLinkRow("view the work", `${BASE_URL}/inspect/works/${report.workId}`, 0) +
     reportLinkRow("view the recording (upload your master here)", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
     reportLinkRow("open your catalog", `${BASE_URL}/inspect`, 2);
-  return (
-    `<!doctype html><meta charset="utf-8"><body style="${LEGACY_BODY_STYLE}">` +
-    `<div style="color:#B87333;margin-bottom:8px">pica — registered</div>` +
-    `${escapeHtml(lines.join("\n"))}` +
-    `<div style="margin-top:14px">${links}</div>` +
-    `<div style="margin-top:14px"><button onclick="${bridgeSend("'sendStems'")}">log stems →</button></div>` +
-    `<div style="margin-top:8px"><button onclick="${bridgeSend("'deliver'")}">share with →</button></div>` +
-    `<div style="margin-top:16px"><button onclick="${CLOSE_JS}">close</button></div>`
+  return withFlatStyle(
+    `<div class="h">pica / registered</div>` +
+    `<div class="hint">${kvRows.join("")}</div>` +
+    links +
+    `<div class="divider"></div>` +
+    `<div class="actions">` +
+    `<button onclick="${CLOSE_JS}">close</button> ` +
+    `<button onclick="${bridgeSend("'sendStems'")}">log stems →</button> ` +
+    `<button class="btn-primary" onclick="${bridgeSend("'deliver'")}">share with →</button>` +
+    `</div>`,
   );
 }

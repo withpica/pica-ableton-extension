@@ -70,29 +70,29 @@ describe("finalReportHtml", () => {
 
   it("renders ownership lines and omits when undefined", () => {
     expect(finalReportHtml({ ...base, masterOwnership: "created" })).toContain("your org now owns 100%");
-    expect(finalReportHtml({ ...base, masterOwnership: "skipped_existing" })).toContain("master ownership: already set");
+    expect(finalReportHtml({ ...base, masterOwnership: "skipped_existing" })).toContain("already set.");
     expect(finalReportHtml({ ...base, masterOwnership: "failed" })).toContain("could not be saved automatically");
     expect(finalReportHtml(base)).not.toContain("master ownership");
   });
 
   it("distinguishes credits skipped / error / saved, and omits when undefined", () => {
-    expect(finalReportHtml({ ...base, credits: { state: "skipped" } })).toContain("credits: skipped.");
-    expect(finalReportHtml({ ...base, credits: { state: "error", error: "boom" } })).toContain("credits: could not be saved.");
-    expect(finalReportHtml({ ...base, credits: { state: "saved", outcomes: [{ creditedName: "a", instrument: "b", status: "saved_linked" }] } })).toContain("credits: 1 saved.");
+    expect(finalReportHtml({ ...base, credits: { state: "skipped" } })).toContain("skipped.");
+    expect(finalReportHtml({ ...base, credits: { state: "error", error: "boom" } })).toContain("could not be saved.");
+    expect(finalReportHtml({ ...base, credits: { state: "saved", outcomes: [{ creditedName: "a", instrument: "b", status: "saved_linked" }] } })).toContain("1 saved.");
     expect(finalReportHtml(base)).not.toContain("credits:");
   });
 
   it("distinguishes writers skipped / error / saved-empty, and omits when undefined", () => {
-    expect(finalReportHtml({ ...base, writers: { state: "skipped" } })).toContain("writers: skipped.");
-    expect(finalReportHtml({ ...base, writers: { state: "error", error: "x" } })).toContain("writers: could not be saved.");
-    expect(finalReportHtml({ ...base, writers: { state: "saved", outcomes: [] } })).toContain("writers: none added.");
+    expect(finalReportHtml({ ...base, writers: { state: "skipped" } })).toContain("skipped.");
+    expect(finalReportHtml({ ...base, writers: { state: "error", error: "x" } })).toContain("could not be saved.");
+    expect(finalReportHtml({ ...base, writers: { state: "saved", outcomes: [] } })).toContain("none added.");
     expect(finalReportHtml(base)).not.toContain("writers:");
   });
 
   it("shows the splice line only when > 0", () => {
-    expect(finalReportHtml({ ...base, spliceLogged: 3 })).toContain("splice samples: 3 logged");
-    expect(finalReportHtml({ ...base, spliceLogged: 0 })).not.toContain("splice samples");
-    expect(finalReportHtml(base)).not.toContain("splice samples");
+    expect(finalReportHtml({ ...base, spliceLogged: 3 })).toContain("3 logged");
+    expect(finalReportHtml({ ...base, spliceLogged: 0 })).not.toContain("3 logged");
+    expect(finalReportHtml(base)).not.toContain("logged");
   });
 
   it("renders a log-stems button and labels the recording link for the master upload", () => {
@@ -240,7 +240,7 @@ describe("shareStemsHtml", () => {
 
   it("renders lowercase heading 'which stems to share' with no em dash", () => {
     const html = shareStemsHtml(stems);
-    expect(html).toContain("pica: which stems to share");
+    expect(html).toContain("pica / which stems to share");
     expect(html).not.toContain("—");
     expect(html).not.toContain("&mdash;");
   });
@@ -343,7 +343,7 @@ describe("stemsReportHtml", () => {
   const url = "https://withpica.com/inspect/recordings/r1";
   it("renders the 'stems logged' title and the body", () => {
     const html = stemsReportHtml("✓ drum loop\n✓ vocal loop", url);
-    expect(html).toContain("pica — stems logged");
+    expect(html).toContain("pica / stems logged");
     expect(html).toContain("✓ drum loop");
   });
   it("renders the PICA link with a copy button", () => {
@@ -356,5 +356,30 @@ describe("stemsReportHtml", () => {
     expect(html).toContain("share with →");
     expect(html).toContain("'share'");
     expect(html).toContain("close_and_send");
+  });
+});
+
+describe("flat picker/report/choice dialogs", () => {
+  it("shareStemsHtml keeps .stem-row/data-id/select include payload, adds flat header", () => {
+    const h = shareStemsHtml([{ id: "a", label: "drums", fileType: "stem" }]);
+    expect(h).toContain("--copper:#B87333");
+    expect(h).toContain('class="h"');
+    expect(h).toContain('class="stem-row" data-id="a"');
+    expect(h).toContain("row.querySelector('select').value==='include'");
+  });
+  it("finalReportHtml keeps the 3 copy link ids + follow-on payloads + no em dash", () => {
+    const h = finalReportHtml({ action: "registered", title: "T", workId: "w", recordingId: "r", spliceLogged: 1 });
+    expect(h).toContain('id="u0"'); expect(h).toContain('id="u1"'); expect(h).toContain('id="u2"');
+    expect(h).toContain("'sendStems'"); expect(h).toContain("'deliver'");
+    expect(h).not.toContain("—"); // em dash removed (royalty-free, no clearance needed)
+  });
+  it("duplicateChoiceHtml keeps #vt + the three actions", () => {
+    const h = duplicateChoiceHtml("T", ["remix", "edit"]);
+    expect(h).toContain('id="vt"');
+    expect(h).toContain("action:'existing'"); expect(h).toContain("action:'newVersion'"); expect(h).toContain("action:'cancel'");
+  });
+  it("stemsReportHtml keeps #u + share follow-on", () => {
+    const h = stemsReportHtml("body", "https://x/y");
+    expect(h).toContain('id="u"'); expect(h).toContain("'share'");
   });
 });
