@@ -47,4 +47,21 @@ describe("deriveRenderTargets", () => {
     expect(t[0]!.name).toBe("untitled");
     expect(t[0]!.label).toBe("untitled");
   });
+  it("disambiguates duplicate track names so each stem gets a distinct label", () => {
+    // Common after freeze & flatten: every track named the same.
+    const t = deriveRenderTargets([
+      { name: "tracking", className: "AudioTrack" },
+      { name: "tracking", className: "AudioTrack" },
+      { name: "tracking", className: "AudioTrack" },
+    ]);
+    expect(t.map((x) => x.label)).toEqual(["tracking", "tracking 2", "tracking 3"]);
+    expect(t.map((x) => x.name)).toEqual(["tracking", "tracking 2", "tracking 3"]);
+  });
+  it("counts blanks-as-untitled together when disambiguating", () => {
+    const t = deriveRenderTargets([
+      { name: "", className: "AudioTrack" },
+      { name: "  ", className: "AudioTrack" },
+    ]);
+    expect(t.map((x) => x.label)).toEqual(["untitled", "untitled 2"]);
+  });
 });
