@@ -3,35 +3,15 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <style>
-      :root { --bg:#0A0A0A; --line:rgba(255,255,255,.10); --fg:#EDEDED; --muted:rgba(255,255,255,.45); --copper:#B87333; }
-      * { box-sizing:border-box; }
-      body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; padding:16px; }
-      h1 { font-size:14px; font-weight:400; letter-spacing:.04em; margin:0 0 4px; }
-      .hint { color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; margin-bottom:12px; }
-      #rows { max-height:300px; overflow-y:auto; padding-right:10px; }
-      .credit-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
-      .credit-row input { background:transparent; border:1px solid var(--line); color:var(--fg); padding:6px 8px; font:12px ui-monospace,Menlo,monospace; }
-      .credit-row input:focus { outline:none; border-color:var(--copper); }
-      .credit-row .instrument { flex:1; }
-      .credit-row .who { flex:1.2; }
-      .credit-row .remove { background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:14px; padding:0 2px; }
-      .add { background:transparent; border:1px dashed var(--line); color:var(--muted); width:100%; padding:7px; cursor:pointer; font-size:12px; margin-top:2px; }
-      .caret { background:transparent; border:none; color:var(--muted); cursor:pointer; width:16px; padding:0; font-size:11px; }
-      .caret.leaf { visibility:hidden; }
-      .actions { display:flex; gap:8px; margin-top:16px; }
-      .actions button { flex:1; padding:9px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; font-size:12px; letter-spacing:.04em; }
-      .actions button.primary { border-color:var(--copper); color:var(--copper); }
-    </style>
   </head>
   <body>
-    <h1>who played what?</h1>
-    <div class="hint" id="hint">instrument is a suggestion from the track name — edit freely. leave a row's name blank to skip it.</div>
+    <div class="h">who played what?</div>
+    <div class="hint" id="hint">instrument is a suggestion from the track name, edit freely. leave a row's name blank to skip it.</div>
     <div id="rows"></div>
     <datalist id="people"></datalist>
     <button class="add" id="add">+ add a part</button>
     <div class="actions">
-      <button id="skip">skip — do later</button>
+      <button id="skip">skip, do later</button>
       <button id="save" class="primary">save credits</button>
     </div>
 

@@ -3,28 +3,11 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <style>
-      :root { --bg:#0A0A0A; --line:rgba(255,255,255,.10); --fg:#EDEDED; --muted:rgba(255,255,255,.45); --copper:#B87333; }
-      * { box-sizing:border-box; }
-      body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif; padding:16px; }
-      h1 { font-size:14px; font-weight:400; letter-spacing:.04em; margin:0 0 4px; }
-      .hint { color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; margin-bottom:6px; }
-      .note { color:var(--copper); font-size:11px; margin-bottom:10px; }
-      .note a { color:var(--copper); }
-      #rows { max-height:300px; overflow-y:auto; padding-right:10px; }
-      .stem-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
-      .stem-row select { background:#1A1A1A; color:var(--fg); border:1px solid var(--line); padding:5px; font-size:12px; }
-      .stem-row input { background:transparent; border:1px solid var(--line); color:var(--fg); padding:6px 8px; font:12px ui-monospace,Menlo,monospace; flex:1; }
-      .stem-row input:focus { outline:none; border-color:var(--copper); }
-      .actions { display:flex; gap:8px; margin-top:16px; }
-      .actions button { flex:1; padding:9px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; font-size:12px; letter-spacing:.04em; }
-      .actions button.primary { border-color:var(--copper); color:var(--copper); }
-    </style>
   </head>
   <body>
-    <h1>log these stems in pica</h1>
+    <div class="h">log these stems in pica</div>
     <div class="hint">pick the audio tracks to upload as stems.</div>
-    <div class="note">stems render <b>pre-fx</b> — freeze &amp; flatten a track first to capture it as you hear it. uploading your finished master? <a id="masterlink" target="_blank">upload it here</a>.</div>
+    <div class="hint">stems render <b>pre-fx</b>, freeze &amp; flatten a track first to capture it as you hear it. uploading your finished master? <a id="masterlink" target="_blank">upload it here</a>.</div>
     <div id="rows"></div>
     <div class="actions">
       <button id="skip">cancel</button>

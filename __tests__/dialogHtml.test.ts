@@ -70,29 +70,29 @@ describe("finalReportHtml", () => {
 
   it("renders ownership lines and omits when undefined", () => {
     expect(finalReportHtml({ ...base, masterOwnership: "created" })).toContain("your org now owns 100%");
-    expect(finalReportHtml({ ...base, masterOwnership: "skipped_existing" })).toContain("master ownership: already set");
+    expect(finalReportHtml({ ...base, masterOwnership: "skipped_existing" })).toContain("already set.");
     expect(finalReportHtml({ ...base, masterOwnership: "failed" })).toContain("could not be saved automatically");
     expect(finalReportHtml(base)).not.toContain("master ownership");
   });
 
   it("distinguishes credits skipped / error / saved, and omits when undefined", () => {
-    expect(finalReportHtml({ ...base, credits: { state: "skipped" } })).toContain("credits: skipped.");
-    expect(finalReportHtml({ ...base, credits: { state: "error", error: "boom" } })).toContain("credits: could not be saved.");
-    expect(finalReportHtml({ ...base, credits: { state: "saved", outcomes: [{ creditedName: "a", instrument: "b", status: "saved_linked" }] } })).toContain("credits: 1 saved.");
+    expect(finalReportHtml({ ...base, credits: { state: "skipped" } })).toContain("skipped.");
+    expect(finalReportHtml({ ...base, credits: { state: "error", error: "boom" } })).toContain("could not be saved.");
+    expect(finalReportHtml({ ...base, credits: { state: "saved", outcomes: [{ creditedName: "a", instrument: "b", status: "saved_linked" }] } })).toContain("1 saved.");
     expect(finalReportHtml(base)).not.toContain("credits:");
   });
 
   it("distinguishes writers skipped / error / saved-empty, and omits when undefined", () => {
-    expect(finalReportHtml({ ...base, writers: { state: "skipped" } })).toContain("writers: skipped.");
-    expect(finalReportHtml({ ...base, writers: { state: "error", error: "x" } })).toContain("writers: could not be saved.");
-    expect(finalReportHtml({ ...base, writers: { state: "saved", outcomes: [] } })).toContain("writers: none added.");
+    expect(finalReportHtml({ ...base, writers: { state: "skipped" } })).toContain("skipped.");
+    expect(finalReportHtml({ ...base, writers: { state: "error", error: "x" } })).toContain("could not be saved.");
+    expect(finalReportHtml({ ...base, writers: { state: "saved", outcomes: [] } })).toContain("none added.");
     expect(finalReportHtml(base)).not.toContain("writers:");
   });
 
   it("shows the splice line only when > 0", () => {
-    expect(finalReportHtml({ ...base, spliceLogged: 3 })).toContain("splice samples: 3 logged");
-    expect(finalReportHtml({ ...base, spliceLogged: 0 })).not.toContain("splice samples");
-    expect(finalReportHtml(base)).not.toContain("splice samples");
+    expect(finalReportHtml({ ...base, spliceLogged: 3 })).toContain("3 logged");
+    expect(finalReportHtml({ ...base, spliceLogged: 0 })).not.toContain("3 logged");
+    expect(finalReportHtml(base)).not.toContain("logged");
   });
 
   it("renders a log-stems button and labels the recording link for the master upload", () => {
@@ -140,8 +140,10 @@ describe("duplicateChoiceHtml", () => {
 
 describe("titlePromptHtml", () => {
   it("renders a single title input and the prompt heading", () => {
-    expect(titlePromptHtml()).toContain('id="t"');
-    expect(titlePromptHtml()).toContain("which work?");
+    const h = titlePromptHtml();
+    expect(h).toContain('id="t"');
+    expect(h).toContain('class="h"');
+    expect(h).toContain("which work?");
   });
 });
 
@@ -215,7 +217,7 @@ describe("rename: register report follow-on buttons", () => {
 describe("rename: deliverHtml is now 'share'", () => {
   it("renders share title, body, and button", () => {
     const html = deliverHtml("Wave");
-    expect(html).toContain('pica — share "Wave"');
+    expect(html).toContain('pica / share "Wave"');
     expect(html).toContain("share this work with someone by email");
     expect(html).toContain(">share</button>");
     expect(html).not.toContain("pica — deliver");
@@ -238,7 +240,7 @@ describe("shareStemsHtml", () => {
 
   it("renders lowercase heading 'which stems to share' with no em dash", () => {
     const html = shareStemsHtml(stems);
-    expect(html).toContain("pica: which stems to share");
+    expect(html).toContain("pica / which stems to share");
     expect(html).not.toContain("—");
     expect(html).not.toContain("&mdash;");
   });
@@ -280,11 +282,68 @@ describe("shareStemsHtml", () => {
   });
 });
 
+describe("flat form dialogs", () => {
+  const FLAT_STYLE_MARKER = "--copper:#B87333";
+
+  it("deliverHtml is flat + keeps its field ids and share payload", () => {
+    const h = deliverHtml('a "b" work');
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain('class="h"');
+    expect(h).toContain('id="e"');
+    expect(h).toContain('id="n"');
+    expect(h).toContain('id="d"');
+    expect(h).toContain("document.getElementById('e').value.trim()");
+    expect(h).toContain("allowDownload:document.getElementById('d').checked");
+    expect(h).toContain("&quot;b&quot;");
+    expect(h).not.toContain("#1A1A1A");
+  });
+
+  it("pasteKeyHtml keeps #k + apiKey payload", () => {
+    const h = pasteKeyHtml();
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain('id="k"');
+    expect(h).toContain("apiKey:document.getElementById('k').value.trim()");
+    expect(h).not.toContain("#1A1A1A");
+  });
+
+  it("titlePromptHtml keeps #t + title payload", () => {
+    const h = titlePromptHtml();
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain("title:document.getElementById('t').value.trim()");
+    expect(h).not.toContain("#1A1A1A");
+  });
+
+  it("linkMessageHtml keeps the #u anchor + copy", () => {
+    const h = linkMessageHtml("t", "b", "https://x/y");
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain('id="u"');
+    expect(h).toContain("https://x/y");
+    expect(h).not.toContain("#1A1A1A");
+  });
+
+  it("messageHtml is flat + keeps body + close", () => {
+    const h = messageHtml("pica — error", "something went wrong");
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain('class="h"');
+    expect(h).toContain("something went wrong");
+    expect(h).not.toContain("#1A1A1A");
+  });
+
+  it("deliverConfirmHtml is flat + keeps confirmed/cancelled payloads", () => {
+    const h = deliverConfirmHtml("a@b.com");
+    expect(h).toContain(FLAT_STYLE_MARKER);
+    expect(h).toContain('class="h"');
+    expect(h).toContain("confirmed:true");
+    expect(h).toContain("cancelled:true");
+    expect(h).not.toContain("#1A1A1A");
+  });
+});
+
 describe("stemsReportHtml", () => {
   const url = "https://withpica.com/inspect/recordings/r1";
   it("renders the 'stems logged' title and the body", () => {
     const html = stemsReportHtml("✓ drum loop\n✓ vocal loop", url);
-    expect(html).toContain("pica — stems logged");
+    expect(html).toContain("pica / stems logged");
     expect(html).toContain("✓ drum loop");
   });
   it("renders the PICA link with a copy button", () => {
@@ -297,5 +356,30 @@ describe("stemsReportHtml", () => {
     expect(html).toContain("share with →");
     expect(html).toContain("'share'");
     expect(html).toContain("close_and_send");
+  });
+});
+
+describe("flat picker/report/choice dialogs", () => {
+  it("shareStemsHtml keeps .stem-row/data-id/select include payload, adds flat header", () => {
+    const h = shareStemsHtml([{ id: "a", label: "drums", fileType: "stem" }]);
+    expect(h).toContain("--copper:#B87333");
+    expect(h).toContain('class="h"');
+    expect(h).toContain('class="stem-row" data-id="a"');
+    expect(h).toContain("row.querySelector('select').value==='include'");
+  });
+  it("finalReportHtml keeps the 3 copy link ids + follow-on payloads + no em dash", () => {
+    const h = finalReportHtml({ action: "registered", title: "T", workId: "w", recordingId: "r", spliceLogged: 1 });
+    expect(h).toContain('id="u0"'); expect(h).toContain('id="u1"'); expect(h).toContain('id="u2"');
+    expect(h).toContain("'sendStems'"); expect(h).toContain("'deliver'");
+    expect(h).not.toContain("—"); // em dash removed (royalty-free, no clearance needed)
+  });
+  it("duplicateChoiceHtml keeps #vt + the three actions", () => {
+    const h = duplicateChoiceHtml("T", ["remix", "edit"]);
+    expect(h).toContain('id="vt"');
+    expect(h).toContain("action:'existing'"); expect(h).toContain("action:'newVersion'"); expect(h).toContain("action:'cancel'");
+  });
+  it("stemsReportHtml keeps #u + share follow-on", () => {
+    const h = stemsReportHtml("body", "https://x/y");
+    expect(h).toContain('id="u"'); expect(h).toContain("'share'");
   });
 });
