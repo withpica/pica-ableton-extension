@@ -89,6 +89,20 @@ describe("deliverWork", () => {
     const r = await deliverWork({ client }, base);
     expect(r).toEqual({ state: "error", message: "PICA returned HTTP 500", code: "500" });
   });
+
+  it("includes included_file_ids in the pica_share_send payload when provided", async () => {
+    const client = fakeClient(() => ({ share_url: "u", recipient_resolution: { classification: "external", display_name: null } }));
+    await deliverWork({ client }, { ...base, includedFileIds: ["f1", "f2"] });
+    const arg = client.callTool.mock.calls[0]?.[1];
+    expect(arg).toMatchObject({ included_file_ids: ["f1", "f2"] });
+  });
+
+  it("omits included_file_ids from the payload when includedFileIds is undefined", async () => {
+    const client = fakeClient(() => ({ share_url: "u", recipient_resolution: { classification: "external", display_name: null } }));
+    await deliverWork({ client }, base);
+    const arg = client.callTool.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(arg, "included_file_ids")).toBe(false);
+  });
 });
 
 describe("friendlyDeliverError", () => {

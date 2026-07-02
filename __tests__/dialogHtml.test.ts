@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escapeHtml, messageHtml, linkMessageHtml, finalReportHtml, type RegisterReport, pasteKeyHtml, duplicateChoiceHtml, titlePromptHtml, deliverHtml, deliverConfirmHtml, stemsReportHtml } from "../src/dialogHtml";
+import { escapeHtml, messageHtml, linkMessageHtml, finalReportHtml, type RegisterReport, pasteKeyHtml, duplicateChoiceHtml, titlePromptHtml, deliverHtml, deliverConfirmHtml, stemsReportHtml, shareStemsHtml } from "../src/dialogHtml";
 
 describe("escapeHtml", () => {
   it("escapes &, <, > and quotes", () => {
@@ -227,6 +227,56 @@ describe("rename: deliverConfirmHtml is now 'sharing'", () => {
     const html = deliverConfirmHtml("a@b.com");
     expect(html).toContain("first time sharing with a@b.com");
     expect(html).not.toContain("first time sending to");
+  });
+});
+
+describe("shareStemsHtml", () => {
+  const stems = [
+    { id: "id-1", label: "drums", fileType: "wav" },
+    { id: "id-2", label: 'bass "DI"', fileType: "aiff" },
+  ];
+
+  it("renders lowercase heading 'which stems to share' with no em dash", () => {
+    const html = shareStemsHtml(stems);
+    expect(html).toContain("pica: which stems to share");
+    expect(html).not.toContain("—");
+    expect(html).not.toContain("&mdash;");
+  });
+
+  it("renders one stem-row per stem with the correct data-id", () => {
+    const html = shareStemsHtml(stems);
+    expect(html).toContain('data-id="id-1"');
+    expect(html).toContain('data-id="id-2"');
+    expect((html.match(/class="stem-row"/g) ?? []).length).toBe(2);
+  });
+
+  it("each row has an include/skip select defaulting to include", () => {
+    const html = shareStemsHtml(stems);
+    expect((html.match(/<option value="include">/g) ?? []).length).toBe(2);
+    expect((html.match(/<option value="skip">/g) ?? []).length).toBe(2);
+    // include appears before skip in each row (default is include)
+    expect(html.indexOf('<option value="include">')).toBeLessThan(html.indexOf('<option value="skip">'));
+  });
+
+  it("shows each stem label (escaped) and file_type", () => {
+    const html = shareStemsHtml(stems);
+    expect(html).toContain("drums");
+    // label with quotes is escaped
+    expect(html).toContain("bass &quot;DI&quot;");
+    expect(html).not.toContain('bass "DI"');
+    expect(html).toContain("wav");
+    expect(html).toContain("aiff");
+  });
+
+  it("has a share button that collects included data-ids and a cancel button", () => {
+    const html = shareStemsHtml(stems);
+    expect(html).toContain(">share</button>");
+    expect(html).toContain(">cancel</button>");
+    expect(html).toContain("close_and_send");
+    expect(html).toContain("cancelled:true");
+    // share button posts ids array
+    expect(html).toContain("ids");
+    expect(html).toContain("row.dataset.id");
   });
 });
 
