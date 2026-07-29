@@ -14,7 +14,8 @@ const audioHtmlFlat = injectFlatStyle(audioHtml);
 import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { PicaMcpClient } from "./pica/mcpClient";
-import { readApiKey } from "./pica/keyStore";
+import { readApiKey, readCredentials, keyPrefix } from "./pica/keyStore";
+import { ensureIdentity, destinationLine } from "./pica/identity";
 import { readSong, type SongLike } from "./session/read";
 import { buildMetadata, buildSummary } from "./session/snapshot";
 import { derivePartTree } from "./session/parts";
@@ -50,6 +51,8 @@ import {
   deliverConfirmHtml,
   stemsReportHtml,
   shareStemsHtml,
+  accountHtml,
+  disconnectConfirmHtml,
   type RegisterReport,
   type StepResult,
 } from "./dialogHtml";
@@ -57,7 +60,12 @@ import { deliverWork, isDeliverableEmail } from "./pica/deliver";
 import { mapAudioQueryToStems, selectionParam } from "./pica/shareStems";
 import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } from "./session/renderTargets";
 import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUpload";
-import { connectAndStoreKey, withReconnect, safeParse } from "./pica/connect";
+import {
+  connectAndStoreKey,
+  withReconnect,
+  safeParse,
+  disconnect,
+} from "./pica/connect";
 import { ensureMasterOwnership, type MasterOwnershipOutcome } from "./pica/ownership";
 import {
   stemsOpenerLabel,
@@ -113,6 +121,128 @@ export function activate(activation: ActivationContext): void {
   });
   void context.ui.registerContextMenuAction("AudioTrack", "Share with… (PICA)", DELIVER_ID);
   void context.ui.registerContextMenuAction("MidiTrack", "Share with… (PICA)", DELIVER_ID);
+
+  // ADR-259: the deliberate route to "who am I connected as", and the only way
+  // to change account or sign out without editing the filesystem. Until this
+  // existed the connect flow could ONLY be reached by having no key or by a
+  // 401 / insufficient scope, so a user validly connected to the WRONG account
+  // had no route to it at all.
+  const ACCOUNT_ID = "pica.account";
+  context.commands.registerCommand(ACCOUNT_ID, () => {
+    void runAccount(context).catch((e) => {
+      void showError(context, e instanceof Error ? e.message : String(e));
+    });
+  });
+  void context.ui.registerContextMenuAction("AudioTrack", "PICA account…", ACCOUNT_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "PICA account…", ACCOUNT_ID);
+}
+
+const ACCOUNT_W = 460;
+const ACCOUNT_H = 340;
+const DISCONNECT_H = 400;
+
+/** The host will not open a second modal in the turn the previous one closes. */
+function yieldBetweenModals(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 250));
+}
+
+/**
+ * Resolve the connected account for display. Best-effort by contract: a dialog
+ * that cannot name the destination still opens and says the account is
+ * unconfirmed, which is a weaker warning than a hidden one but never a
+ * blocked write.
+ */
+async function describeConnection(
+  storageDir: string,
+  apiKey: string,
+): Promise<string> {
+  const identity = await ensureIdentity(BASE_URL, storageDir, apiKey).catch(
+    () => null,
+  );
+  return destinationLine(identity);
+}
+
+/** The account surface: show who this install writes as, then switch or disconnect. */
+async function runAccount(context: ExtensionContext<"1.0.0">): Promise<void> {
+  const storageDir = context.environment.storageDirectory;
+  if (!storageDir) {
+    await showError(context, "no storage directory available, cannot read the pica key.");
+    return;
+  }
+
+  const creds = await readCredentials(storageDir);
+  if (!creds) {
+    // Not connected at all: the useful thing is the connect flow itself, not a
+    // dialog telling them so.
+    const key = await connectAndStoreKey(context, storageDir);
+    if (!key) return;
+    await yieldBetweenModals();
+    await showDialog(
+      context,
+      messageHtml("pica / connected", await describeConnection(storageDir, key)),
+      260,
+    );
+    return;
+  }
+
+  const identity =
+    creds.identity ??
+    (await ensureIdentity(BASE_URL, storageDir, creds.apiKey).catch(() => null));
+
+  const action = await context.ui.showModalDialog(
+    `data:text/html,${encodeURIComponent(
+      accountHtml(
+        destinationLine(identity),
+        keyPrefix(creds.apiKey),
+        identity?.resolvedAt ? identity.resolvedAt.slice(0, 10) : null,
+      ),
+    )}`,
+    ACCOUNT_W,
+    ACCOUNT_H,
+  );
+
+  if (action === "switch") {
+    await yieldBetweenModals();
+    // A fresh mint overwrites the key AND re-resolves the identity, so the
+    // cached account can never outlive the key it described.
+    const key = await connectAndStoreKey(context, storageDir);
+    if (!key) return;
+    await yieldBetweenModals();
+    await showDialog(
+      context,
+      messageHtml("pica / switched", await describeConnection(storageDir, key)),
+      260,
+    );
+    return;
+  }
+
+  if (action === "disconnect") {
+    await yieldBetweenModals();
+    const raw = await context.ui.showModalDialog(
+      `data:text/html,${encodeURIComponent(
+        disconnectConfirmHtml(
+          destinationLine(identity),
+          keyPrefix(creds.apiKey),
+        ),
+      )}`,
+      ACCOUNT_W,
+      DISCONNECT_H,
+    );
+    const answer = safeParse(raw) as { confirmed?: boolean };
+    if (answer.confirmed !== true) return;
+    const removed = await disconnect(storageDir);
+    await yieldBetweenModals();
+    await showDialog(
+      context,
+      messageHtml(
+        "pica / disconnected",
+        removed
+          ? "this machine has forgotten the key. the key itself stays valid at pica until you revoke it in your connection settings."
+          : "there was no stored key to forget.",
+      ),
+      260,
+    );
+  }
 }
 
 async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: string): Promise<void> {
@@ -135,16 +265,23 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
 
   // Fetch the org's people once, up front — powers the artist typeahead here and
   // the credit/writer typeaheads later (one fetch for the whole flow). Best-effort.
-  const candidates = await fetchPeopleCandidates(
-    new PicaMcpClient({ baseUrl: BASE_URL, apiKey }),
-  ).catch(() => []);
+  // The connected account resolves alongside it (ADR-259) so naming the
+  // destination costs no extra wall-clock before the panel paints.
+  const [candidates, destination] = await Promise.all([
+    fetchPeopleCandidates(new PicaMcpClient({ baseUrl: BASE_URL, apiKey })).catch(
+      () => [],
+    ),
+    describeConnection(storageDir, apiKey),
+  ]);
 
   // 2. Confirm-and-edit panel. Title + artist are user-entered (the Set has neither).
   const prefillJson = JSON.stringify({ summary, key: derivedKey, workType: "song" }).replace(/</g, "\\u003c");
   const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
+  const destinationJson = JSON.stringify(destination).replace(/</g, "\\u003c");
   const injected = interfaceHtmlFlat.replace(
     "</head>",
-    `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
+    `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson}; ` +
+      `window.__PICA_DESTINATION__ = ${destinationJson};</script></head>`,
   );
   const url = `data:text/html,${encodeURIComponent(injected)}`;
   const raw = await context.ui.showModalDialog(url, PANEL_W, PANEL_H);
@@ -261,7 +398,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           spliceLogged,
           credits,
         });
-        await runReportFollowOn(context, runWithClient, action, e.existingWorkId, recordingId, answer.title!);
+        await runReportFollowOn(context, runWithClient, action, e.existingWorkId, recordingId, answer.title!, destination);
         return undefined;
       }
 
@@ -301,7 +438,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           spliceLogged,
           credits,
         });
-        await runReportFollowOn(context, runWithClient, action, e.existingWorkId, recordingId, answer.title!);
+        await runReportFollowOn(context, runWithClient, action, e.existingWorkId, recordingId, answer.title!, destination);
         return undefined;
       }
 
@@ -361,7 +498,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     credits,
     writers,
   });
-  await runReportFollowOn(context, runWithClient, reportAction, r.workId, r.recordingId, answer.title!);
+  await runReportFollowOn(context, runWithClient, reportAction, r.workId, r.recordingId, answer.title!, destination);
 }
 
 const AUDIO_W = 520;
@@ -382,6 +519,7 @@ async function runSendStems(
   workId: string,
   recordingId: string,
   workTitle: string,
+  destination: string,
 ): Promise<void> {
   const song = context.application.song;
   const allTracks = (song.tracks ?? []) as unknown as TrackLike[];
@@ -525,7 +663,7 @@ async function runSendStems(
   // yield so the share dialog can open (same pattern as the register report).
   if (action === "share") {
     await new Promise((resolve) => setTimeout(resolve, 250));
-    await runDeliver(context, run, workId, workTitle);
+    await runDeliver(context, run, workId, workTitle, destination);
   }
 }
 
@@ -574,7 +712,14 @@ async function runSendStemsStandalone(context: ExtensionContext<"1.0.0">, hostAp
     );
     return;
   }
-  await runSendStems(context, runWithClient, found.workId, found.recordingId, title);
+  await runSendStems(
+    context,
+    runWithClient,
+    found.workId,
+    found.recordingId,
+    title,
+    await describeConnection(storageDir, currentKey),
+  );
 }
 
 /**
@@ -588,6 +733,7 @@ async function runDeliver(
   run: ClientRunner,
   workId: string,
   workTitle: string,
+  destination: string,
 ): Promise<void> {
   // Query audio files for this work and show a stem picker when there are multiple.
   // Best-effort: any failure or empty result skips the picker (never blocks the share).
@@ -625,7 +771,7 @@ async function runDeliver(
   }
 
   const raw = await context.ui.showModalDialog(
-    `data:text/html,${encodeURIComponent(deliverHtml(workTitle))}`,
+    `data:text/html,${encodeURIComponent(deliverHtml(workTitle, destination))}`,
     DELIVER_W,
     DELIVER_H,
   );
@@ -723,7 +869,13 @@ async function runDeliverStandalone(context: ExtensionContext<"1.0.0">, hostApiV
     await showError(context, `no registered work titled "${title}" found. register it in PICA first, then deliver.`);
     return;
   }
-  await runDeliver(context, runWithClient, found.workId, title);
+  await runDeliver(
+    context,
+    runWithClient,
+    found.workId,
+    title,
+    await describeConnection(storageDir, currentKey),
+  );
 }
 
 const CREDITS_W = 540;
@@ -846,6 +998,7 @@ async function runReportFollowOn(
   workId: string,
   recordingId: string,
   workTitle: string,
+  destination: string,
 ): Promise<void> {
   if (action !== "sendStems" && action !== "deliver") return;
   // The report is a webview modal; the host won't open a second modal in the
@@ -856,10 +1009,10 @@ async function runReportFollowOn(
       await showError(context, "couldn't start stems — no recording was created for this work.");
       return;
     }
-    await runSendStems(context, run, workId, recordingId, workTitle).catch((e) =>
-      showError(context, e instanceof Error ? e.message : String(e)),
+    await runSendStems(context, run, workId, recordingId, workTitle, destination).catch(
+      (e) => showError(context, e instanceof Error ? e.message : String(e)),
     );
   } else {
-    await runDeliver(context, run, workId, workTitle);
+    await runDeliver(context, run, workId, workTitle, destination);
   }
 }
