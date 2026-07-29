@@ -6,6 +6,14 @@
   </head>
   <body>
     <div class="h">register this set in pica</div>
+    <!--
+      ADR-259: which catalogue this registration lands in. Hidden until the
+      host supplies it, so an older build that injects no destination renders
+      exactly as before rather than showing an empty row.
+    -->
+    <div class="kv" id="acct" style="display: none">
+      <span class="k">account</span><span class="v" id="acctv"></span>
+    </div>
     <div class="hint" id="summary"></div>
 
     <div class="label">title *</div>
@@ -47,6 +55,13 @@
       }
 
       document.getElementById("summary").textContent = prefill.summary || "";
+
+      // The connected account, injected as window.__PICA_DESTINATION__.
+      var destination = window.__PICA_DESTINATION__ || prefill.destination || "";
+      if (destination) {
+        document.getElementById("acctv").textContent = destination;
+        document.getElementById("acct").style.display = "flex";
+      }
       if (prefill.key) document.getElementById("key").value = prefill.key;
       if (prefill.workType) document.getElementById("workType").value = prefill.workType;
 

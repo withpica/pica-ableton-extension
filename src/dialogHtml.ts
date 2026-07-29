@@ -104,6 +104,77 @@ export function pasteKeyHtml(): string {
   );
 }
 
+/**
+ * The account dialog: who this Live install writes as, and the two ways out
+ * of it (ADR-259).
+ *
+ * Reachable without a failed write, which is the point. Before this, the ONLY
+ * triggers for the connect flow were an absent key and a 401 / insufficient
+ * scope, so someone validly connected to the WRONG account had no route to it
+ * at all. That is what six weeks of renaming pica-credentials.json by hand was
+ * working around.
+ *
+ * Bridges 'switch', 'disconnect', or 'ok'.
+ */
+export function accountHtml(
+  destination: string,
+  keyPrefix: string | null,
+  connectedSince: string | null,
+): string {
+  const rows =
+    destinationRow(destination) +
+    (keyPrefix
+      ? `<div class="kv"><span class="k">key</span><span class="v">${escapeHtml(keyPrefix)}</span></div>`
+      : "") +
+    (connectedSince
+      ? `<div class="kv"><span class="k">confirmed</span><span class="v">${escapeHtml(connectedSince)}</span></div>`
+      : "");
+  return withFlatStyle(
+    `<div class="h">pica / account</div>` +
+    rows +
+    `<div class="hint" style="margin-top:12px">everything you register from this set goes into the catalogue above.</div>` +
+    `<div class="divider"></div>` +
+    `<div class="actions">` +
+    `<button onclick="${CLOSE_JS}">close</button> ` +
+    `<button onclick="${bridgeSend("'disconnect'")}">disconnect</button> ` +
+    `<button class="btn-primary" onclick="${bridgeSend("'switch'")}">switch account →</button>` +
+    `</div>`,
+  );
+}
+
+/**
+ * Disconnect confirmation.
+ *
+ * States plainly that this forgets the key locally and does NOT revoke it,
+ * because a user who believes "disconnect" killed the credential would leave a
+ * live key on a machine they have walked away from. The key prefix shown here
+ * is byte-identical to the one listed in /settings, so it is the string to
+ * match on when revoking for real.
+ *
+ * Bridges {confirmed:true} or {cancelled:true}.
+ */
+export function disconnectConfirmHtml(
+  destination: string,
+  keyPrefix: string | null,
+): string {
+  const yesJs = bridgeSend("JSON.stringify({confirmed:true})");
+  const noJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const revokeUrl = `${BASE_URL}/settings?tab=connection`;
+  return withFlatStyle(
+    `<div class="h">pica / disconnect</div>` +
+    `<div class="hint">this forgets the key on this machine. live will ask you to connect again next time you register.</div>` +
+    destinationRow(destination) +
+    `<div class="hint" style="margin-top:12px">the key itself stays valid at pica until you revoke it. to revoke it, open your connection settings and remove the key${
+      keyPrefix ? ` starting ${escapeHtml(keyPrefix)}` : ""
+    }:</div>` +
+    `<div class="hint" style="margin-top:8px;word-break:break-all">` +
+    `<a id="u" href="${escapeHtml(revokeUrl)}" target="_blank">${escapeHtml(revokeUrl)}</a></div>` +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(noJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(yesJs)}">disconnect</button></div>`,
+  );
+}
+
 /** One-input prompt: ask for a work title; bridges {title} or {cancelled:true}. */
 export function titlePromptHtml(
   subtitle = "type the title of the registered work these stems belong to:",
@@ -120,9 +191,23 @@ export function titlePromptHtml(
   );
 }
 
+/**
+ * The connected-identity line every about-to-write dialog carries (ADR-259).
+ *
+ * Rendered as a quiet row rather than a warning: it is the answer to "which
+ * catalogue is this going into", which on a shared machine is the difference
+ * between filing your work and filing it into whoever connected last.
+ */
+export function destinationRow(destination: string): string {
+  return (
+    `<div class="kv"><span class="k">account</span>` +
+    `<span class="v">${escapeHtml(destination)}</span></div>`
+  );
+}
+
 /** Share dialog: email + optional note + allow-download toggle.
  *  Bridges {cancelled:true} or {email, note, allowDownload}. */
-export function deliverHtml(workTitle: string): string {
+export function deliverHtml(workTitle: string, destination?: string): string {
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
   const sendJs = bridgeSend(
     "JSON.stringify({email:document.getElementById('e').value.trim()," +
@@ -132,6 +217,7 @@ export function deliverHtml(workTitle: string): string {
   return withFlatStyle(
     `<div class="h">pica / share "${escapeHtml(workTitle)}"</div>` +
     `<div class="hint">share this work with someone by email. they get a private link, revocable, expires in 30 days.</div>` +
+    (destination ? destinationRow(destination) : "") +
     `<div class="label">recipient</div>` +
     `<input class="input" id="e" placeholder="email address">` +
     `<div class="label">message (optional)</div>` +

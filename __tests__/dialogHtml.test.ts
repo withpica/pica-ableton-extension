@@ -1,5 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { escapeHtml, messageHtml, linkMessageHtml, finalReportHtml, type RegisterReport, pasteKeyHtml, duplicateChoiceHtml, titlePromptHtml, deliverHtml, deliverConfirmHtml, stemsReportHtml, shareStemsHtml } from "../src/dialogHtml";
+import {
+  escapeHtml,
+  messageHtml,
+  linkMessageHtml,
+  finalReportHtml,
+  type RegisterReport,
+  pasteKeyHtml,
+  duplicateChoiceHtml,
+  titlePromptHtml,
+  deliverHtml,
+  deliverConfirmHtml,
+  stemsReportHtml,
+  shareStemsHtml,
+  destinationRow,
+  accountHtml,
+  disconnectConfirmHtml,
+} from "../src/dialogHtml";
 
 describe("escapeHtml", () => {
   it("escapes &, <, > and quotes", () => {
@@ -381,5 +397,84 @@ describe("flat picker/report/choice dialogs", () => {
   it("stemsReportHtml keeps #u + share follow-on", () => {
     const h = stemsReportHtml("body", "https://x/y");
     expect(h).toContain('id="u"'); expect(h).toContain("'share'");
+  });
+});
+
+/**
+ * ADR-259 identity + disconnect dialogs.
+ */
+describe("destinationRow / deliverHtml destination", () => {
+  it("renders the account as a flat kv row", () => {
+    const html = destinationRow("writing into soundslikefez");
+    expect(html).toContain('<span class="k">account</span>');
+    expect(html).toContain("writing into soundslikefez");
+  });
+
+  it("escapes the destination", () => {
+    expect(destinationRow('<img src=x onerror="alert(1)">')).not.toContain("<img");
+  });
+
+  it("deliverHtml shows the account when given one", () => {
+    expect(deliverHtml("My Song", "writing into soundslikefez")).toContain(
+      "writing into soundslikefez",
+    );
+  });
+
+  it("deliverHtml is unchanged when no account is supplied", () => {
+    // Callers that cannot resolve an account must not get an empty row.
+    expect(deliverHtml("My Song")).not.toContain('class="k">account');
+  });
+});
+
+describe("accountHtml", () => {
+  const html = () =>
+    accountHtml("writing into soundslikefez", "withpica_live_aaaaaa...", "2026-07-29");
+
+  it("names the account, the key prefix and when it was confirmed", () => {
+    expect(html()).toContain("writing into soundslikefez");
+    expect(html()).toContain("withpica_live_aaaaaa...");
+    expect(html()).toContain("2026-07-29");
+  });
+
+  it("offers switch and disconnect, both bridging over close_and_send", () => {
+    expect(html()).toContain("switch");
+    expect(html()).toContain("disconnect");
+    expect(html()).toContain("close_and_send");
+  });
+
+  it("omits the key and date rows when they are unknown", () => {
+    const bare = accountHtml("writing into soundslikefez", null, null);
+    expect(bare).not.toContain('class="k">key');
+    expect(bare).not.toContain('class="k">confirmed');
+  });
+});
+
+describe("disconnectConfirmHtml", () => {
+  const html = () =>
+    disconnectConfirmHtml("writing into soundslikefez", "withpica_live_aaaaaa...");
+
+  /**
+   * The load-bearing copy. A user who believes "disconnect" killed the
+   * credential would walk away from a machine holding a live key.
+   */
+  it("says plainly that the key stays valid until revoked", () => {
+    expect(html()).toContain("stays valid");
+    expect(html()).toContain("revoke");
+  });
+
+  it("points at connection settings and names the key to revoke", () => {
+    expect(html()).toContain("/settings?tab=connection");
+    expect(html()).toContain("withpica_live_aaaaaa...");
+  });
+
+  it("bridges a confirmation and a cancel", () => {
+    expect(html()).toContain("confirmed");
+    expect(html()).toContain("cancelled");
+  });
+
+  it("reads sensibly with no key prefix to show", () => {
+    const bare = disconnectConfirmHtml("writing into soundslikefez", null);
+    expect(bare).toContain("stays valid");
+    expect(bare).not.toContain("starting");
   });
 });

@@ -1,9 +1,12 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
 import type { ExtensionContext } from "@ableton-extensions/sdk";
-import { writeApiKey } from "./keyStore";
+import { writeApiKey, clearCredentials } from "./keyStore";
+import { resolveIdentity } from "./identity";
 import { pasteKeyHtml } from "../dialogHtml";
 import { PicaMcpError } from "./mcpClient";
+
+type FetchFn = typeof fetch;
 
 const BASE_URL = "https://withpica.com";
 const CONNECT_W = 420;
@@ -26,10 +29,29 @@ export function safeParse(raw: string): Record<string, unknown> {
   }
 }
 
+/**
+ * Persist a freshly minted key together with the account it belongs to.
+ *
+ * The identity resolve happens HERE, at mint time, for two reasons: it is the
+ * only moment we know the key is new (so a cached identity from the previous
+ * account can never survive a switch), and it keeps the per-dialog path free of
+ * a network round-trip. Best-effort: an unresolvable identity stores the key
+ * alone, and the dialogs say the account is unconfirmed rather than refusing.
+ */
+async function persistKey(
+  storageDir: string,
+  apiKey: string,
+  fetchFn: FetchFn,
+): Promise<void> {
+  const identity = await resolveIdentity(BASE_URL, apiKey, fetchFn);
+  await writeApiKey(storageDir, apiKey, identity ?? undefined);
+}
+
 /** Open the paste-key dialog; persist + return a shaped key, else null. */
 async function promptAndStorePastedKey(
   context: ExtensionContext<"1.0.0">,
   storageDir: string,
+  fetchFn: FetchFn,
 ): Promise<string | null> {
   const raw = await context.ui.showModalDialog(
     `data:text/html,${encodeURIComponent(pasteKeyHtml())}`,
@@ -39,7 +61,7 @@ async function promptAndStorePastedKey(
   const parsed = safeParse(raw);
   const key = typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
   if (!isKeyShaped(key)) return null;
-  await writeApiKey(storageDir, key);
+  await persistKey(storageDir, key, fetchFn);
   return key;
 }
 
@@ -51,6 +73,7 @@ async function promptAndStorePastedKey(
 export async function connectAndStoreKey(
   context: ExtensionContext<"1.0.0">,
   storageDir: string,
+  fetchFn: FetchFn = fetch,
 ): Promise<string | null> {
   const raw = await context.ui.showModalDialog(
     `${BASE_URL}/connect/ableton?host=ableton`,
@@ -60,15 +83,29 @@ export async function connectAndStoreKey(
   const parsed = safeParse(raw);
 
   if (typeof parsed.apiKey === "string" && isKeyShaped(parsed.apiKey)) {
-    await writeApiKey(storageDir, parsed.apiKey); // Mode A
+    await persistKey(storageDir, parsed.apiKey, fetchFn); // Mode A
     return parsed.apiKey;
   }
   // Only an explicit "open in browser instead" opens the paste field. A plain
   // cancel / window-close / unparseable result aborts quietly.
   if (parsed.useBrowser === true) {
-    return promptAndStorePastedKey(context, storageDir);
+    return promptAndStorePastedKey(context, storageDir, fetchFn);
   }
   return null;
+}
+
+/**
+ * Forget the stored key.
+ *
+ * Local only: this unlinks the credentials file, it does NOT revoke the key at
+ * PICA, which stays valid until revoked in /settings. No revocation surface is
+ * reachable with this key's scopes — DELETE /api/admin/api-keys requires the
+ * `admin` scope AND the key's row id, neither of which a connection key has.
+ * The account dialog therefore says so and shows the key prefix to revoke by.
+ * Scoped in docs/follow-ups/2026-07-29-adr259-self-revoke-endpoint.md.
+ */
+export async function disconnect(storageDir: string): Promise<boolean> {
+  return clearCredentials(storageDir);
 }
 
 /**
@@ -82,6 +119,11 @@ export async function withReconnect<T>(
   make: (key: string) => Promise<T>,
   key: string,
   onReconnect?: (freshKey: string) => void,
+  // Carried through to the reconnect's identity resolve so the injection seam
+  // reaches every path that can mint a key. Without it this function would be
+  // the one route to connectAndStoreKey that could only be tested by stubbing
+  // a global, i.e. by remembering to.
+  fetchFn: FetchFn = fetch,
 ): Promise<T> {
   try {
     return await make(key);
@@ -98,7 +140,7 @@ export async function withReconnect<T>(
       e instanceof PicaMcpError &&
       (e.code === "401" || e.code === "INSUFFICIENT_SCOPE")
     ) {
-      const fresh = await connectAndStoreKey(context, storageDir);
+      const fresh = await connectAndStoreKey(context, storageDir, fetchFn);
       if (!fresh) throw e;
       // Let the caller carry the fresh key into subsequent calls in this run.
       onReconnect?.(fresh);
