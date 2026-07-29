@@ -13,7 +13,7 @@ This covers **Stages 1–3** of ADR-259 ("PICA inside the DAW") plus the registe
   registration never needs to save the Set, so a license is not required for
   testing. (A Standard authorization *hides* the Extensions page.)
 - **Node.js ≥ 24.14.1** (required by the Ableton CLI).
-- A **PICA** account (the extension mints the `write:catalog` key for you on
+- A **PICA** account (the extension mints a scoped connection key for you on
   first use — see Connecting to PICA below).
 
 ## Setup
@@ -39,10 +39,20 @@ npm install
 
 The first time you run **Register Set in PICA** with no stored key, the extension
 opens a Connect window: log in (or create an account) and click **authorize** —
-the extension stores a `write:catalog` connection key for you. No file editing.
+the extension stores the connection key for you. No file editing.
 
-If the in-app window can't sign you in, click **open in browser instead**, copy
-the key shown after you authorize, and paste it into the extension's paste field.
+The key is minted with **`write:catalog`** (register works, recordings, credits
+and ownership), **`read:people`** (the credit and writer typeaheads) and
+**`write:files`** (audio and stem upload). It carries no `admin`, no
+`write:people` and no finance scope.
+
+**If you are not signed in, sign in from your browser, not from the Connect
+window.** That window is a captive webview: Live gives it no close button and
+dismisses it only when the page hands a result back, so navigating it to the
+login page leaves a modal that cannot be closed. The window offers **paste a
+key** and **cancel** for exactly this reason. Open
+`withpica.com/connect/ableton` in a browser, authorize, copy the key, then use
+**paste a key**.
 
 If a stored key has been revoked or expired, a register will detect the 401 and
 re-open Connect once to mint a fresh key, then retry automatically.
@@ -51,6 +61,32 @@ re-open Connect once to mint a fresh key, then retry automatically.
 `<storageDirectory>/pica-credentials.json` yourself.
 
 The key is read from the SDK storage directory and is **never** written into your `.als` Set.
+
+### 3. Seeing and changing the connected account
+
+Right-click any track → **PICA account…**. It shows which pica account and
+organisation this Live install writes into, the key's prefix (the same string
+listed in your PICA connection settings), and two actions:
+
+- **switch account** — runs Connect again and replaces the stored key. This is
+  the supported way to move between accounts; you do not need to touch
+  `pica-credentials.json`.
+- **disconnect** — forgets the key on this machine.
+
+The same account line appears on the register confirmation panel and the share
+dialog, so you can see where a write is going before you make it. If it reads
+*could not confirm which pica account this key writes into*, the extension could
+not reach PICA to check — the key may still be valid.
+
+> **Disconnect is local.** It removes the key from this machine; it does **not**
+> revoke it. The key stays valid until you remove it in
+> `withpica.com/settings?tab=connection` — match it by the prefix the disconnect
+> dialog shows. A server-side revoke is scoped in
+> `docs/follow-ups/2026-07-29-adr259-self-revoke-endpoint.md` in the PICA repo.
+
+Note that **removing and re-adding the `.ablx` does not clear the key**:
+credentials live in `Extensions Data/<extension-id>/`, keyed to the extension ID
+rather than the install, so they survive a reinstall. Use **disconnect**.
 
 ## Develop · build · package
 
