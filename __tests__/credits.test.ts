@@ -194,47 +194,31 @@ describe("loadExistingCredits", () => {
   });
 });
 
-describe("saveCredits (one bulk call)", () => {
+describe("saveCredits (one single-credit call per person)", () => {
   const rows: CreditRow[] = [
     { instrument: "drums", performerName: "Dave Smith" },
     { instrument: "keys", performerName: "Maria" },
   ];
+  const TOOL = "pica_recording_credits_update";
 
-  type BulkRow = {
-    recording_id: string;
-    credited_name: string;
-    role: string;
-    status: "created" | "skipped_existing";
-    credit_id?: string;
-  };
-  const bulkResult = (results: BulkRow[]) => ({
-    dry_run: false,
-    target_recording_count: 1,
-    total_rows: results.length,
-    created: results.filter((r) => r.status === "created").length,
-    skipped_existing: results.filter((r) => r.status === "skipped_existing").length,
-    would_create: 0,
-    would_skip_existing: 0,
-    results,
-  });
-  const row = (
-    credited_name: string,
-    status: BulkRow["status"] = "created",
-  ): BulkRow => ({ recording_id: "rec-1", credited_name, role: "Performer", status });
-
-  it("issues ONE pica_recording_credits_bulk_update call for all merged people", async () => {
+  it("calls pica_recording_credits_update once per merged person, single form, with the instrument", async () => {
     const c = fakeClient();
-    c.callTool.mockResolvedValueOnce(bulkResult([row("Dave Smith"), row("Maria")]));
+    c.callTool.mockResolvedValue({ id: "credit" });
 
     const outcomes = await saveCredits(c, "rec-1", rows, []);
 
-    expect(c.callTool).toHaveBeenCalledTimes(1);
-    expect(c.callTool).toHaveBeenCalledWith("pica_recording_credits_bulk_update", {
-      recording_ids: ["rec-1"],
-      credits: [
-        { credited_name: "Dave Smith", role: "Performer", instrument: "drums" },
-        { credited_name: "Maria", role: "Performer", instrument: "keys" },
-      ],
+    expect(c.callTool).toHaveBeenCalledTimes(2);
+    expect(c.callTool).toHaveBeenCalledWith(TOOL, {
+      recording_id: "rec-1",
+      credited_name: "Dave Smith",
+      role: "Performer",
+      instrument: "drums",
+    });
+    expect(c.callTool).toHaveBeenCalledWith(TOOL, {
+      recording_id: "rec-1",
+      credited_name: "Maria",
+      role: "Performer",
+      instrument: "keys",
     });
     // no person_id sent → both draft
     expect(outcomes).toEqual([
@@ -243,9 +227,20 @@ describe("saveCredits (one bulk call)", () => {
     ]);
   });
 
+  it("never calls a tool name the server removed, and never the batch form (it drops instrument)", async () => {
+    const c = fakeClient();
+    c.callTool.mockResolvedValue({ id: "credit" });
+    await saveCredits(c, "rec-1", rows, []);
+    for (const [name, args] of c.callTool.mock.calls) {
+      expect(name).not.toBe("pica_recording_credits_bulk_update");
+      expect(args).not.toHaveProperty("credits");
+      expect(args).not.toHaveProperty("recording_ids");
+    }
+  });
+
   it("labels saved_linked for a row whose person_id we sent", async () => {
     const c = fakeClient();
-    c.callTool.mockResolvedValueOnce(bulkResult([row("Elle")]));
+    c.callTool.mockResolvedValue({ id: "credit" });
     const cands = [{ id: "p1", name: "Elle Limebear", stageNames: ["Elle"] }];
 
     const out = await saveCredits(
@@ -256,20 +251,24 @@ describe("saveCredits (one bulk call)", () => {
       cands,
     );
 
-    expect(c.callTool).toHaveBeenCalledWith("pica_recording_credits_bulk_update", {
-      recording_ids: ["rec-1"],
-      credits: [
-        { credited_name: "Elle", role: "Performer", instrument: "guitar", person_id: "p1" },
-      ],
+    expect(c.callTool).toHaveBeenCalledWith(TOOL, {
+      recording_id: "rec-1",
+      credited_name: "Elle",
+      role: "Performer",
+      instrument: "guitar",
+      person_id: "p1",
     });
     expect(out[0]).toMatchObject({ status: "saved_linked" });
   });
 
-  it("maps a server-reported skipped_existing row to skipped_existing", async () => {
+  it("treats RECORDING_CREDIT_EXISTS as unchanged", async () => {
     const c = fakeClient();
-    c.callTool.mockResolvedValueOnce(
-      bulkResult([row("Dave Smith", "skipped_existing"), row("Maria")]),
-    );
+    c.callTool.mockImplementation(async (_n: string, a: { credited_name: string }) => {
+      if (a.credited_name === "Dave Smith") {
+        throw new PicaMcpError("already credited", "RECORDING_CREDIT_EXISTS");
+      }
+      return { id: "credit" };
+    });
 
     const out = await saveCredits(c, "rec-1", rows, []);
 
@@ -279,16 +278,19 @@ describe("saveCredits (one bulk call)", () => {
 
   it("pre-skips rows already in `existing` and sends only the rest, preserving order", async () => {
     const c = fakeClient();
-    c.callTool.mockResolvedValueOnce(bulkResult([row("Maria")]));
+    c.callTool.mockResolvedValue({ id: "credit" });
     const existing: ExistingCredit[] = [
       { id: "c1", credited_name: "dave smith", role: "Performer", instrument: "drums" },
     ];
 
     const out = await saveCredits(c, "rec-1", rows, existing);
 
-    expect(c.callTool).toHaveBeenCalledWith("pica_recording_credits_bulk_update", {
-      recording_ids: ["rec-1"],
-      credits: [{ credited_name: "Maria", role: "Performer", instrument: "keys" }],
+    expect(c.callTool).toHaveBeenCalledTimes(1);
+    expect(c.callTool).toHaveBeenCalledWith(TOOL, {
+      recording_id: "rec-1",
+      credited_name: "Maria",
+      role: "Performer",
+      instrument: "keys",
     });
     expect(out).toEqual([
       { creditedName: "Dave Smith", instrument: "drums", status: "skipped_existing" },
@@ -319,25 +321,29 @@ describe("saveCredits (one bulk call)", () => {
 
   it("rethrows a 401 PicaMcpError (so withReconnect can reconnect)", async () => {
     const c = fakeClient();
-    c.callTool.mockRejectedValueOnce(new PicaMcpError("unauthorised", "401"));
+    c.callTool.mockRejectedValue(new PicaMcpError("unauthorised", "401"));
     await expect(saveCredits(c, "rec-1", rows, [])).rejects.toBeInstanceOf(PicaMcpError);
   });
 
-  it("marks the whole batch failed on a non-401 error (route is all-or-nothing)", async () => {
+  it("a failure marks only that person failed; the others still save", async () => {
     const c = fakeClient();
-    c.callTool.mockRejectedValueOnce(new PicaMcpError("server error", "500"));
+    c.callTool.mockImplementation(async (_n: string, a: { credited_name: string }) => {
+      if (a.credited_name === "Dave Smith") throw new PicaMcpError("server error", "500");
+      return { id: "credit" };
+    });
 
     const out = await saveCredits(c, "rec-1", rows, []);
 
+    expect(c.callTool).toHaveBeenCalledTimes(2);
     expect(out).toEqual([
       { creditedName: "Dave Smith", instrument: "drums", status: "failed", error: "server error" },
-      { creditedName: "Maria", instrument: "keys", status: "failed", error: "server error" },
+      { creditedName: "Maria", instrument: "keys", status: "saved_draft" },
     ]);
   });
 
-  it("omits person_id for new (free-text) and ambiguous names", async () => {
+  it("omits person_id for new (free-text) and ambiguous names, and instrument when blank", async () => {
     const c = fakeClient();
-    c.callTool.mockResolvedValueOnce(bulkResult([row("Brand New Person"), row("Sam")]));
+    c.callTool.mockResolvedValue({ id: "credit" });
     const cands = [
       { id: "p1", name: "Elle Limebear", stageNames: ["Elle"] },
       { id: "p2", name: "Sam", stageNames: [] },
@@ -348,16 +354,17 @@ describe("saveCredits (one bulk call)", () => {
       c,
       "rec-1",
       [
-        { instrument: "keys", performerName: "Brand New Person" },
+        { instrument: "", performerName: "Brand New Person" },
         { instrument: "bass", performerName: "Sam" },
       ],
       [],
       cands,
     );
 
-    const sent = c.callTool.mock.calls[0]![1] as { credits: Array<Record<string, unknown>> };
-    expect(sent.credits[0]!.person_id).toBeUndefined();
-    expect(sent.credits[1]!.person_id).toBeUndefined();
+    const sent = c.callTool.mock.calls.map((call) => call[1] as Record<string, unknown>);
+    expect(sent[0]!.person_id).toBeUndefined();
+    expect(sent[0]!.instrument).toBeUndefined();
+    expect(sent[1]!.person_id).toBeUndefined();
   });
 });
 
