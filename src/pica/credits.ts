@@ -186,26 +186,26 @@ export async function loadExistingCredits(
   return Array.isArray(list) ? (list as ExistingCredit[]) : [];
 }
 
-/** Per-row outcome from pica_recording_credits_bulk_update (subset we read). */
-interface BulkCreditRow {
-  credited_name: string;
-  role: string;
-  status: "created" | "skipped_existing" | "would_create" | "would_skip_existing";
-}
-interface BulkCreditsResult {
-  results?: BulkCreditRow[];
-}
+/** The server's code when this person already holds this role on the recording. */
+const CREDIT_EXISTS = "RECORDING_CREDIT_EXISTS";
 
 /**
- * One bulk write (latency slice, 2026-06-18): all merged performer credits go to
- * the recording in a SINGLE pica_recording_credits_bulk_update call rather than
- * one pica_recording_credits_update per person. Each MCP call carries ~1.4-2.0s
- * of fixed /api/mcp overhead (measured), so an N-performer Set used to pay
- * N x that; this collapses it to one. The server resolves credited_name ->
- * person_id (ADR-255 resolve-on-write) and dedups on (recording, credited_name,
- * role), returning per-row created / skipped_existing. We pre-skip rows already
- * in `existing` (so they're not re-sent) and infer linked-vs-draft from whether
- * we sent a person_id — the bulk result carries no per-row person_id.
+ * One pica_recording_credits_update call per merged person, all in flight at
+ * once, each in its single-credit form (recording_id + credited_name + role +
+ * instrument).
+ *
+ * Not the batch form (credits[] + recording_ids): on mcp-server 2.110.0 its
+ * executor does not forward `instrument`, so every performer saved with no
+ * instrument. Until 2026-10-29 this sent one call to
+ * pica_recording_credits_bulk_update, a name removed in mcp-server 2.99.0, so
+ * every performer showed "failed".
+ *
+ * Each person settles on its own: one failure marks only that person failed.
+ * The single form also notifies a linked person who has a PICA account outside
+ * this organisation (in-app, Telegram, email), as it does for any caller. We
+ * pre-skip rows already in `existing`, and treat RECORDING_CREDIT_EXISTS (a
+ * credit saved since we read) as unchanged. Linked vs draft is whether we sent
+ * a person_id.
  */
 export async function saveCredits(
   client: PicaMcpClient,
@@ -220,65 +220,42 @@ export async function saveCredits(
   const existingKey = new Set(
     existing.map((e) => `${norm(e.credited_name)}|${e.role}`),
   );
-  const isExisting = (name: string): boolean =>
-    existingKey.has(`${norm(name)}|${ROLE}`);
-  const personIdByName = new Map(
-    merged.map((m) => [
-      norm(m.performerName),
-      resolvePersonId(m.performerName, candidates),
-    ]),
+
+  const settled = await Promise.allSettled(
+    merged.map(async (m): Promise<CreditOutcome> => {
+      const base = { creditedName: m.performerName, instrument: m.instrument };
+      if (existingKey.has(`${norm(m.performerName)}|${ROLE}`)) {
+        return { ...base, status: "skipped_existing" };
+      }
+      const personId = resolvePersonId(m.performerName, candidates);
+      try {
+        await client.callTool("pica_recording_credits_update", {
+          recording_id: recordingId,
+          credited_name: m.performerName,
+          role: ROLE,
+          ...(m.instrument ? { instrument: m.instrument } : {}),
+          ...(personId ? { person_id: personId } : {}),
+        });
+      } catch (e) {
+        // A 401 reaches withReconnect (mint a fresh key and re-run); a re-run
+        // skips what saved, so it is safe.
+        if (e instanceof PicaMcpError && e.code === "401") throw e;
+        if (e instanceof PicaMcpError && e.code === CREDIT_EXISTS) {
+          return { ...base, status: "skipped_existing" };
+        }
+        return {
+          ...base,
+          status: "failed",
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+      return { ...base, status: personId ? "saved_linked" : "saved_draft" };
+    }),
   );
 
-  const toSend = merged.filter((m) => !isExisting(m.performerName));
-
-  let failed: string | null = null;
-  const statusByName = new Map<string, BulkCreditRow["status"]>();
-  if (toSend.length > 0) {
-    try {
-      const res = await client.callTool<BulkCreditsResult>(
-        "pica_recording_credits_bulk_update",
-        {
-          recording_ids: [recordingId],
-          credits: toSend.map((m) => {
-            const personId = personIdByName.get(norm(m.performerName));
-            return {
-              credited_name: m.performerName,
-              role: ROLE,
-              instrument: m.instrument,
-              ...(personId ? { person_id: personId } : {}),
-            };
-          }),
-        },
-      );
-      for (const r of res?.results ?? []) {
-        statusByName.set(norm(r.credited_name), r.status);
-      }
-    } catch (e) {
-      // One call now. A 401 still reaches withReconnect (mint a fresh key and
-      // re-run); re-run is safe (insert-only + dedup on
-      // (recording, credited_name, role)). Any other error means the
-      // all-or-nothing bulk route wrote nothing, so the whole sent batch failed.
-      if (e instanceof PicaMcpError && e.code === "401") throw e;
-      failed = e instanceof Error ? e.message : String(e);
-    }
-  }
-
-  return merged.map((m): CreditOutcome => {
-    const k = norm(m.performerName);
-    if (isExisting(m.performerName)) {
-      return { creditedName: m.performerName, instrument: m.instrument, status: "skipped_existing" };
-    }
-    if (failed) {
-      return { creditedName: m.performerName, instrument: m.instrument, status: "failed", error: failed };
-    }
-    if (statusByName.get(k) === "skipped_existing") {
-      return { creditedName: m.performerName, instrument: m.instrument, status: "skipped_existing" };
-    }
-    // created (or, defensively, no per-row echo) -> linked iff we sent a person_id
-    return {
-      creditedName: m.performerName,
-      instrument: m.instrument,
-      status: personIdByName.get(k) ? "saved_linked" : "saved_draft",
-    };
-  });
+  const rejected = settled.find(
+    (s): s is PromiseRejectedResult => s.status === "rejected",
+  );
+  if (rejected) throw rejected.reason;
+  return settled.map((s) => (s as PromiseFulfilledResult<CreditOutcome>).value);
 }
