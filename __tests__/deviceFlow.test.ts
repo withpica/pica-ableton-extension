@@ -42,7 +42,7 @@ describe("startDeviceSignIn", () => {
       }),
     );
     expect(await startDeviceSignIn(BASE, f)).toEqual(START);
-    expect(f).toHaveBeenCalledWith(`${BASE}/api/connect/device`, expect.objectContaining({ method: "POST" }));
+    expect(f).toHaveBeenCalledWith(`${BASE}/api/public/connect/device`, expect.objectContaining({ method: "POST" }));
   });
 
   it("is null on an older PICA without device sign-in, so the paste flow runs", async () => {

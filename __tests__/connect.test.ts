@@ -364,8 +364,8 @@ describe("connectAndStoreKey: device sign-in", () => {
   function deviceFetch(polls: unknown[]) {
     const queue = [...polls];
     return vi.fn(async (url: string) => {
-      if (url.endsWith("/api/connect/device")) return { ok: true, status: 200, json: async () => START_BODY };
-      if (url.endsWith("/api/connect/device/token")) {
+      if (url.endsWith("/api/public/connect/device")) return { ok: true, status: 200, json: async () => START_BODY };
+      if (url.endsWith("/api/public/connect/device/token")) {
         const body = queue.shift() as { api_key?: string };
         return { ok: !!body?.api_key, status: body?.api_key ? 200 : 400, json: async () => body };
       }

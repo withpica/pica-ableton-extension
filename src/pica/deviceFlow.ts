@@ -37,7 +37,7 @@ export async function startDeviceSignIn(
   fetchFn: FetchFn,
 ): Promise<DeviceStart | null> {
   try {
-    const res = await fetchFn(`${baseUrl}/api/connect/device`, {
+    const res = await fetchFn(`${baseUrl}/api/public/connect/device`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ client: "ableton" }),
@@ -72,7 +72,7 @@ export async function pollDeviceToken(
 ): Promise<PollResult> {
   let res: Response;
   try {
-    res = await fetchFn(`${baseUrl}/api/connect/device/token`, {
+    res = await fetchFn(`${baseUrl}/api/public/connect/device/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ device_code: deviceCode }),
