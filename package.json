@@ -1,6 +1,6 @@
 {
   "name": "pica-ableton-extension",
-  "version": "0.10.4",
+  "version": "0.10.5",
   "description": "Register your Ableton Live Set as a work + master recording in PICA, from a right-click.",
   "private": true,
   "type": "module",
