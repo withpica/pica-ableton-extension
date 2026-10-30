@@ -126,6 +126,7 @@ describe("connectAndStoreKey", () => {
     const { ctx } = fakeContext([
       JSON.stringify({ useBrowser: true }),
       JSON.stringify({ apiKey: KEY }),
+      "connect",
     ]);
     await connectAndStoreKey(ctx, "/tmp/store", okFetch());
     expect(writeApiKey).toHaveBeenCalledWith(
@@ -135,14 +136,101 @@ describe("connectAndStoreKey", () => {
     );
   });
 
-  it("useBrowser → opens the paste dialog and persists the pasted key", async () => {
+  it("useBrowser → paste dialog, account check, then persists the pasted key", async () => {
     const { ctx, showModalDialog } = fakeContext([
       JSON.stringify({ useBrowser: true }),
       JSON.stringify({ apiKey: KEY }),
+      "connect",
     ]);
     const out = await connectAndStoreKey(ctx, "/tmp/store", okFetch());
     expect(out).toBe(KEY);
-    expect(showModalDialog).toHaveBeenCalledTimes(2);
+    expect(showModalDialog).toHaveBeenCalledTimes(3);
+  });
+
+  // Founder 2026-10-30: a key pasted from another browser session connected
+  // Live to a different account, and nothing said so before it was saved.
+  it("names the key's account before saving a pasted key", async () => {
+    const { ctx, showModalDialog } = fakeContext([
+      JSON.stringify({ useBrowser: true }),
+      JSON.stringify({ apiKey: KEY }),
+      "connect",
+    ]);
+    await connectAndStoreKey(ctx, "/tmp/store", okFetch());
+    const confirmUrl = decodeURIComponent(showModalDialog.mock.calls[2]![0]);
+    expect(confirmUrl).toContain("is this the right account?");
+    expect(confirmUrl).toContain("hi@soundslikefez.com");
+    expect(confirmUrl).toContain("soundslikefez");
+  });
+
+  it("'not me' saves nothing and goes back to the paste dialog", async () => {
+    const OTHER = "withpica_live_" + "b".repeat(64);
+    const { ctx, showModalDialog } = fakeContext([
+      JSON.stringify({ useBrowser: true }),
+      JSON.stringify({ apiKey: KEY }),
+      "another",
+      JSON.stringify({ apiKey: OTHER }),
+      "connect",
+    ]);
+    const out = await connectAndStoreKey(ctx, "/tmp/store", okFetch());
+    expect(out).toBe(OTHER);
+    expect(writeApiKey).toHaveBeenCalledTimes(1);
+    expect(writeApiKey).toHaveBeenCalledWith("/tmp/store", OTHER, expect.anything());
+    expect(showModalDialog).toHaveBeenCalledTimes(5);
+  });
+
+  it("closing the account check saves nothing", async () => {
+    const { ctx } = fakeContext([
+      JSON.stringify({ useBrowser: true }),
+      JSON.stringify({ apiKey: KEY }),
+      "",
+    ]);
+    const out = await connectAndStoreKey(ctx, "/tmp/store", okFetch());
+    expect(out).toBeNull();
+    expect(writeApiKey).not.toHaveBeenCalled();
+  });
+
+  it("still asks when the key's account cannot be confirmed, and says so", async () => {
+    const { ctx, showModalDialog } = fakeContext([
+      JSON.stringify({ useBrowser: true }),
+      JSON.stringify({ apiKey: KEY }),
+      "connect",
+    ]);
+    const out = await connectAndStoreKey(ctx, "/tmp/store", fakeFetch({ ok: false }));
+    expect(out).toBe(KEY);
+    expect(decodeURIComponent(showModalDialog.mock.calls[2]![0])).toContain(
+      "could not confirm which pica account",
+    );
+    expect(writeApiKey).toHaveBeenCalledWith("/tmp/store", KEY, undefined);
+  });
+
+  // Founder 2026-10-30: the connect address was text Live's window could not open.
+  it("openBrowser from the connect page opens the system browser, then the paste dialog", async () => {
+    const openFn = vi.fn(async () => true);
+    const { ctx, showModalDialog } = fakeContext([
+      JSON.stringify({ openBrowser: true }),
+      JSON.stringify({ apiKey: KEY }),
+      "connect",
+    ]);
+    const out = await connectAndStoreKey(ctx, "/tmp/store", okFetch(), openFn);
+    expect(openFn).toHaveBeenCalledWith("https://withpica.com/connect/ableton");
+    expect(out).toBe(KEY);
+    expect(decodeURIComponent(showModalDialog.mock.calls[1]![0])).toContain(
+      "connect live to your pica account",
+    );
+  });
+
+  it("'open in browser' on the paste dialog opens the browser and brings the dialog back", async () => {
+    const openFn = vi.fn(async () => true);
+    const { ctx, showModalDialog } = fakeContext([
+      JSON.stringify({ useBrowser: true }),
+      JSON.stringify({ openBrowser: true }),
+      JSON.stringify({ apiKey: KEY }),
+      "connect",
+    ]);
+    const out = await connectAndStoreKey(ctx, "/tmp/store", okFetch(), openFn);
+    expect(openFn).toHaveBeenCalledTimes(1);
+    expect(out).toBe(KEY);
+    expect(showModalDialog).toHaveBeenCalledTimes(4);
   });
 
   it("plain cancel → returns null, no paste dialog, no write", async () => {

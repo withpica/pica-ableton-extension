@@ -89,18 +89,55 @@ export function stemsReportHtml(body: string, url: string): string {
 }
 
 /** Paste-key dialog: one input + connect/cancel buttons, both bridging via close_and_send. */
-export function pasteKeyHtml(): string {
+export function pasteKeyHtml(connectUrl: string = `${BASE_URL}/connect/ableton`): string {
   const connectJs = bridgeSend(
     "JSON.stringify({apiKey:document.getElementById('k').value.trim()})",
   );
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  // Live's window cannot open a browser itself, so "open pica in my browser"
+  // hands back to the extension, which asks the OS to (openBrowser.ts) and
+  // then brings this dialog back for the key.
+  const openJs = bridgeSend("JSON.stringify({openBrowser:true})");
+  const step = (n: number, text: string) =>
+    `<div class="step"><span class="n">${n}</span><span>${text}</span></div>`;
   return withFlatStyle(
-    `<div class="h">pica / paste your connection key</div>` +
-    `<div class="hint">paste the withpica_live_… key you copied from the browser:</div>` +
-    `<div class="label">connection key</div>` +
-    `<input class="input" id="k" placeholder="withpica_live_…">` +
+    `<style>.step{display:flex;gap:10px;align-items:baseline;margin:14px 0 6px;color:var(--ink);font-size:13px;line-height:1.45}` +
+    `.step .n{flex:none;width:18px;height:18px;border:1px solid var(--muted);border-radius:50%;text-align:center;font-size:11px;line-height:18px;color:var(--muted)}` +
+    `.sub{margin-left:28px}.link{color:var(--muted);font-size:11px;word-break:break-all}</style>` +
+    `<div class="h">pica / connect live to your pica account</div>` +
+    `<div class="hint">live needs a key from your pica account. it takes three steps:</div>` +
+    step(1, "open pica in your browser and sign in.") +
+    `<div class="sub actions" style="justify-content:flex-start;margin-top:6px">` +
+    `<button class="btn-primary" onclick="${escapeHtml(openJs)}">open pica in my browser</button> ` +
+    `<button onclick="${escapeHtml(copyLinkJs("cu"))}">copy link</button></div>` +
+    `<div class="sub link">or go to <span id="cu">${escapeHtml(connectUrl)}</span></div>` +
+    step(2, "check it shows your account, press <b>authorize</b>, then press <b>copy</b> next to the key it shows you (it starts withpica_live_).") +
+    step(3, "come back here and paste the key below.") +
+    `<div class="sub"><input class="input" id="k" placeholder="paste your key here"></div>` +
     `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
     `<button class="btn-primary" onclick="${escapeHtml(connectJs)}">connect</button></div>`,
+  );
+}
+
+/**
+ * Before a pasted key is saved: the account and catalogue it writes into.
+ *
+ * A pasted key can come from any browser session, so the founder's own test
+ * (2026-10-30) connected Live to a different account than the one they meant,
+ * and nothing said so until after it was saved. Bridges 'connect' or
+ * 'another'.
+ */
+export function confirmKeyAccountHtml(destination: string): string {
+  return withFlatStyle(
+    `<div class="h">pica / is this the right account?</div>` +
+    `<div class="hint">this key writes into:</div>` +
+    destinationRow(destination) +
+    `<div class="hint" style="margin-top:12px">everything you register from live will go into this catalogue.</div>` +
+    `<div class="divider"></div>` +
+    `<div class="actions">` +
+    `<button onclick="${bridgeSend("'another'")}">not me, use another key</button> ` +
+    `<button class="btn-primary" onclick="${bridgeSend("'connect'")}">connect</button>` +
+    `</div>`,
   );
 }
 
