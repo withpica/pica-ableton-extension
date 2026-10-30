@@ -40,6 +40,7 @@ import {
 } from "./pica/credits";
 import { saveWriters, type WriterOutcome } from "./pica/writers";
 import { fetchPeopleCandidates, candidateNames, resolvePersonId, type PersonCandidate } from "./pica/people";
+import { peopleSuggestScript, toSuggestPeople } from "./peopleSuggest";
 import { detectSpliceSamples, saveSpliceSamples } from "./pica/samples";
 import {
   messageHtml,
@@ -281,7 +282,9 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   const injected = interfaceHtmlFlat.replace(
     "</head>",
     `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson}; ` +
-      `window.__PICA_DESTINATION__ = ${destinationJson};</script></head>`,
+      `window.__PICA_DESTINATION__ = ${destinationJson};</script>` +
+      peopleSuggestScript(toSuggestPeople(candidates)) +
+      `</head>`,
   );
   const url = `data:text/html,${encodeURIComponent(injected)}`;
   const raw = await context.ui.showModalDialog(url, PANEL_W, PANEL_H);
@@ -904,7 +907,9 @@ async function runCreditsFlow(
   const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
   const injected = creditsHtmlFlat.replace(
     "</head>",
-    `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
+    `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script>` +
+      peopleSuggestScript(toSuggestPeople(candidates)) +
+      `</head>`,
   );
   const raw = await context.ui.showModalDialog(
     `data:text/html,${encodeURIComponent(injected)}`,
@@ -942,7 +947,9 @@ async function runWritersFlow(
   const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
   const injected = writersHtmlFlat.replace(
     "</head>",
-    `<script>window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script></head>`,
+    `<script>window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script>` +
+      peopleSuggestScript(toSuggestPeople(candidates)) +
+      `</head>`,
   );
   const raw = await context.ui.showModalDialog(
     `data:text/html,${encodeURIComponent(injected)}`,
