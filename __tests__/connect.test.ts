@@ -215,7 +215,7 @@ describe("connectAndStoreKey", () => {
     expect(openFn).toHaveBeenCalledWith("https://withpica.com/connect/ableton");
     expect(out).toBe(KEY);
     expect(decodeURIComponent(showModalDialog.mock.calls[1]![0])).toContain(
-      "paste your connection key",
+      "connect live to your pica account",
     );
   });
 

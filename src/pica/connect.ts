@@ -19,8 +19,8 @@ const CONFIRM_H = 300;
 const MAX_PASTE_ROUNDS = 6;
 const CONNECT_W = 420;
 const CONNECT_H = 560;
-const PASTE_W = 400;
-const PASTE_H = 300;
+const PASTE_W = 440;
+const PASTE_H = 420;
 
 /** Mint format: withpica_live_ + 64 lowercase hex (route.ts:133-134). */
 export function isKeyShaped(k: string): boolean {
