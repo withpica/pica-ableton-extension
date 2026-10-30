@@ -132,7 +132,7 @@ export function deviceCodeHtml(userCode: string, verificationUri: string): strin
     `<style>.code{font-size:30px;letter-spacing:.18em;text-align:center;color:var(--ink);margin:18px 0 6px}` +
     `.center{text-align:center}</style>` +
     `<div class="h">pica / connect live to your pica account</div>` +
-    `<div class="hint">open pica in your browser, check it's your account, and approve this code:</div>` +
+    `<div class="hint">open pica in your browser, check it's your account and that it shows this same code, then approve:</div>` +
     `<div class="code" id="uc">${escapeHtml(userCode)}</div>` +
     `<div class="hint center">it's only valid for 10 minutes, and only on this computer.</div>` +
     `<div class="actions" style="justify-content:center;margin-top:16px">` +
