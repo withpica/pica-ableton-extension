@@ -120,6 +120,34 @@ export function pasteKeyHtml(connectUrl: string = `${BASE_URL}/connect/ableton`)
 }
 
 /**
+ * Device sign-in: the code to approve in the browser (ADR-259 device flow).
+ *
+ * Bridges {open:true} (open the browser on the approve page, then wait),
+ * {wait:true} (the person goes there themselves), {paste:true} (fall back to
+ * pasting a key) or {cancelled:true}. Copying the code stays in the window.
+ */
+export function deviceCodeHtml(userCode: string, verificationUri: string): string {
+  const send = (o: string) => escapeHtml(bridgeSend(`JSON.stringify(${o})`));
+  return withFlatStyle(
+    `<style>.code{font-size:30px;letter-spacing:.18em;text-align:center;color:var(--ink);margin:18px 0 6px}` +
+    `.center{text-align:center}</style>` +
+    `<div class="h">pica / connect live to your pica account</div>` +
+    `<div class="hint">open pica in your browser, check it's your account, and approve this code:</div>` +
+    `<div class="code" id="uc">${escapeHtml(userCode)}</div>` +
+    `<div class="hint center">it's only valid for 10 minutes, and only on this computer.</div>` +
+    `<div class="actions" style="justify-content:center;margin-top:16px">` +
+    `<button class="btn-primary" onclick="${send("{open:true}")}">open pica in my browser</button> ` +
+    `<button onclick="${escapeHtml(copyLinkJs("uc"))}">copy code</button></div>` +
+    `<div class="hint center" style="margin-top:8px">or go to ${escapeHtml(verificationUri)} and type the code.</div>` +
+    `<div class="divider"></div>` +
+    `<div class="actions">` +
+    `<button onclick="${send("{cancelled:true}")}">cancel</button> ` +
+    `<button onclick="${send("{paste:true}")}">use a key instead</button> ` +
+    `<button onclick="${send("{wait:true}")}">i've opened it myself</button></div>`,
+  );
+}
+
+/**
  * Before a pasted key is saved: the account and catalogue it writes into.
  *
  * A pasted key can come from any browser session, so the founder's own test

@@ -4,7 +4,13 @@ import type { ExtensionContext } from "@ableton-extensions/sdk";
 import { writeApiKey, clearCredentials } from "./keyStore";
 import { resolveIdentity, destinationLine } from "./identity";
 import { openInBrowser } from "./openBrowser";
-import { pasteKeyHtml, confirmKeyAccountHtml } from "../dialogHtml";
+import {
+  pasteKeyHtml,
+  confirmKeyAccountHtml,
+  deviceCodeHtml,
+  messageHtml,
+} from "../dialogHtml";
+import { startDeviceSignIn, waitForApproval, type WaitOutcome } from "./deviceFlow";
 import { PicaMcpError } from "./mcpClient";
 
 type FetchFn = typeof fetch;
@@ -56,6 +62,30 @@ async function persistKey(
 }
 
 /**
+ * Name the key's account and catalogue, and save the key only on "connect".
+ * With `allowAnother`, "not me" returns "another" so the caller can ask again.
+ */
+async function confirmAndStore(
+  context: ExtensionContext<"1.0.0">,
+  storageDir: string,
+  key: string,
+  fetchFn: FetchFn,
+  allowAnother = false,
+): Promise<string | "another" | null> {
+  const identity = await resolveIdentity(BASE_URL, key, fetchFn);
+  const answer = await context.ui.showModalDialog(
+    `data:text/html,${encodeURIComponent(confirmKeyAccountHtml(destinationLine(identity)))}`,
+    CONFIRM_W,
+    CONFIRM_H,
+  );
+  if (answer === "connect") {
+    await writeApiKey(storageDir, key, identity ?? undefined);
+    return key;
+  }
+  return allowAnother && answer === "another" ? "another" : null;
+}
+
+/**
  * Open the paste-key dialog until a key is saved or the user backs out.
  *
  * "open in browser" opens the connect page in the system browser and brings
@@ -83,24 +113,64 @@ async function promptAndStorePastedKey(
     }
     const key = typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
     if (!isKeyShaped(key)) return null;
-    const identity = await resolveIdentity(BASE_URL, key, fetchFn);
-    const answer = await context.ui.showModalDialog(
-      `data:text/html,${encodeURIComponent(confirmKeyAccountHtml(destinationLine(identity)))}`,
-      CONFIRM_W,
-      CONFIRM_H,
-    );
-    if (answer === "connect") {
-      await writeApiKey(storageDir, key, identity ?? undefined);
-      return key;
-    }
-    if (answer !== "another") return null;
+    const saved = await confirmAndStore(context, storageDir, key, fetchFn, true);
+    if (saved !== "another") return saved;
   }
   return null;
 }
 
+const DEVICE_W = 440;
+const DEVICE_H = 360;
+
+/** What the person reads when a device sign-in ends without a key. */
+const DEVICE_ENDINGS: Record<Exclude<WaitOutcome["kind"], "key" | "cancelled">, string> = {
+  denied: "the code was denied in your browser, so nothing was connected.",
+  expired: "the code ran out before it was approved. connect again for a new one.",
+  failed: "pica could not finish connecting. connect again, or use a key instead.",
+};
+
 /**
- * Run the Connect flow: open /connect/ableton in the host webview, collect the
- * key by bridge (Mode A) or, on an explicit "open in browser", by paste (Mode C).
+ * Show the code, open the browser if asked, and wait for approval. Returns
+ * the key on approval; "paste" when the person chose to paste a key instead;
+ * null when they cancelled or it ended without a key (they are told why).
+ */
+async function deviceSignIn(
+  context: ExtensionContext<"1.0.0">,
+  start: NonNullable<Awaited<ReturnType<typeof startDeviceSignIn>>>,
+  fetchFn: FetchFn,
+  openFn: OpenFn,
+): Promise<string | "paste" | null> {
+  const choice = safeParse(
+    await context.ui.showModalDialog(
+      `data:text/html,${encodeURIComponent(deviceCodeHtml(start.userCode, start.verificationUri))}`,
+      DEVICE_W,
+      DEVICE_H,
+    ),
+  );
+  if (choice.paste === true) return "paste";
+  if (choice.open === true) await openFn(start.verificationUriComplete);
+  else if (choice.wait !== true) return null;
+
+  const outcome = (await context.ui.withinProgressDialog(
+    `waiting for you to approve ${start.userCode} in your browser…`,
+    { progress: 0 },
+    (_update, signal) => waitForApproval(BASE_URL, start, signal, fetchFn),
+  )) as WaitOutcome;
+  if (outcome.kind === "key") return outcome.apiKey;
+  if (outcome.kind === "cancelled") return null;
+  await context.ui.showModalDialog(
+    `data:text/html,${encodeURIComponent(messageHtml("pica / not connected", DEVICE_ENDINGS[outcome.kind]))}`,
+    400,
+    200,
+  );
+  return null;
+}
+
+/**
+ * Run the Connect flow. Device sign-in first: Live shows a code, the person
+ * approves it on withpica.com, and the key arrives by itself. When PICA has
+ * no device sign-in (older server) or cannot be reached, the connect page in
+ * the host webview as before: key by bridge (Mode A) or by paste (Mode C).
  * Persists and returns the key, or null if the user backed out.
  */
 export async function connectAndStoreKey(
@@ -109,6 +179,18 @@ export async function connectAndStoreKey(
   fetchFn: FetchFn = fetch,
   openFn: OpenFn = openInBrowser,
 ): Promise<string | null> {
+  const start = await startDeviceSignIn(BASE_URL, fetchFn);
+  if (start) {
+    const got = await deviceSignIn(context, start, fetchFn, openFn);
+    if (got === "paste") return promptAndStorePastedKey(context, storageDir, fetchFn, openFn);
+    if (!got) return null;
+    // Saved without a second "is this the right account?": a signed-in person
+    // approved this exact code on a page naming the account and catalogue,
+    // and asking again here could only leave a minted key unsaved but live.
+    await persistKey(storageDir, got, fetchFn);
+    return got;
+  }
+
   const raw = await context.ui.showModalDialog(
     `${BASE_URL}/connect/ableton?host=ableton`,
     CONNECT_W,
