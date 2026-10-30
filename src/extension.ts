@@ -60,6 +60,7 @@ import {
 import { deliverWork, isDeliverableEmail } from "./pica/deliver";
 import { mapAudioQueryToStems, selectionParam } from "./pica/shareStems";
 import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } from "./session/renderTargets";
+import { locatorOptions, resolveRange, type CueLike, type RangeChoice } from "./session/locatorRange";
 import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUpload";
 import {
   connectAndStoreKey,
@@ -545,25 +546,46 @@ async function runSendStems(
   const targets = deriveRenderTargets(audioTracks);
   const masterUrl = `${BASE_URL}/inspect/recordings/${recordingId}`;
 
-  const injected = audioHtmlFlat.replace(
-    "</head>",
-    `<script>window.__PICA_STEMS__ = ${JSON.stringify({
-      stems: targets.map((t, i) => ({ index: i, name: t.name, label: t.label })),
-      masterUrl,
-    }).replace(/</g, "\\u003c")};</script></head>`,
+  const locators = locatorOptions(
+    ((song as unknown as { cuePoints?: CueLike[] }).cuePoints ?? []) as CueLike[],
   );
-  const raw = await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(injected)}`, AUDIO_W, AUDIO_H);
+
   // Join back to render targets by stable array index, not by name: Live audio
   // tracks frequently share a name (default "Audio", common after freeze &
   // flatten), so a name-keyed map would collapse same-named tracks to one entry
   // and silently render the same track twice while dropping the other.
-  let answer: { cancelled?: boolean; stems?: Array<{ index: number; include: boolean; label: string }> };
-  try {
-    answer = JSON.parse(raw);
-  } catch {
-    return;
+  let answer: {
+    cancelled?: boolean;
+    stems?: Array<{ index: number; include: boolean; label: string }>;
+    range?: RangeChoice;
+  } = {};
+  let span: { start: number; end: number; label: string } | null = null;
+  let rangeError: string | null = null;
+  // An unusable range (end before start, after the last clip) reopens the
+  // window with the reason, keeping the chosen range; a few tries, then stop.
+  for (let attempt = 0; attempt < 4 && !span; attempt++) {
+    const injected = audioHtmlFlat.replace(
+      "</head>",
+      `<script>window.__PICA_STEMS__ = ${JSON.stringify({
+        stems: targets.map((t, i) => ({ index: i, name: t.name, label: t.label })),
+        masterUrl,
+        locators: locators.map((l) => ({ index: l.index, name: l.name })),
+        range: answer.range,
+        error: rangeError,
+      }).replace(/</g, "\\u003c")};</script></head>`,
+    );
+    const raw = await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(injected)}`, AUDIO_W, AUDIO_H);
+    try {
+      answer = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (answer.cancelled || !Array.isArray(answer.stems)) return;
+    const resolved = resolveRange(answer.range ?? { mode: "whole" }, locators, songEnd);
+    if ("error" in resolved) rangeError = resolved.error;
+    else span = resolved;
   }
-  if (answer.cancelled || !Array.isArray(answer.stems)) return;
+  if (!span || !answer.stems) return;
 
   const chosen = answer.stems.filter((s) => s.include);
   const results: string[] = [];
@@ -604,8 +626,8 @@ async function runSendStems(
             () =>
               context.resources.renderPreFxAudio(
                 target.track as never,
-                0,
-                songEnd,
+                span.start,
+                span.end,
               ),
           );
           storyTick += 3;
@@ -655,7 +677,9 @@ async function runSendStems(
     },
   );
 
-  const body = results.length ? results.join("\n") : "no stems selected.";
+  const body = results.length
+    ? (span.label === "whole song" ? "" : `section: ${span.label}\n`) + results.join("\n")
+    : "no stems selected.";
   const url = `${BASE_URL}/inspect/recordings/${recordingId}`;
   const action = await context.ui.showModalDialog(
     `data:text/html,${encodeURIComponent(stemsReportHtml(body, url))}`,
