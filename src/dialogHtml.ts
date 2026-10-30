@@ -89,18 +89,49 @@ export function stemsReportHtml(body: string, url: string): string {
 }
 
 /** Paste-key dialog: one input + connect/cancel buttons, both bridging via close_and_send. */
-export function pasteKeyHtml(): string {
+export function pasteKeyHtml(connectUrl: string = `${BASE_URL}/connect/ableton`): string {
   const connectJs = bridgeSend(
     "JSON.stringify({apiKey:document.getElementById('k').value.trim()})",
   );
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  // Live's window cannot open a browser itself, so "open in browser" hands
+  // back to the extension, which asks the OS to (openBrowser.ts) and then
+  // brings this dialog back for the key.
+  const openJs = bridgeSend("JSON.stringify({openBrowser:true})");
   return withFlatStyle(
     `<div class="h">pica / paste your connection key</div>` +
-    `<div class="hint">paste the withpica_live_… key you copied from the browser:</div>` +
+    `<div class="hint">1. open this page in your browser, sign in, check the account it names and press authorize:</div>` +
+    `<div class="kv"><span class="v" id="cu">${escapeHtml(connectUrl)}</span></div>` +
+    `<div class="actions" style="justify-content:flex-start">` +
+    `<button class="btn-primary" onclick="${escapeHtml(openJs)}">open in browser</button> ` +
+    `<button onclick="${escapeHtml(copyLinkJs("cu"))}">copy</button></div>` +
+    `<div class="hint">2. paste the withpica_live_… key it gives you:</div>` +
     `<div class="label">connection key</div>` +
     `<input class="input" id="k" placeholder="withpica_live_…">` +
     `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
     `<button class="btn-primary" onclick="${escapeHtml(connectJs)}">connect</button></div>`,
+  );
+}
+
+/**
+ * Before a pasted key is saved: the account and catalogue it writes into.
+ *
+ * A pasted key can come from any browser session, so the founder's own test
+ * (2026-10-30) connected Live to a different account than the one they meant,
+ * and nothing said so until after it was saved. Bridges 'connect' or
+ * 'another'.
+ */
+export function confirmKeyAccountHtml(destination: string): string {
+  return withFlatStyle(
+    `<div class="h">pica / is this the right account?</div>` +
+    `<div class="hint">this key writes into:</div>` +
+    destinationRow(destination) +
+    `<div class="hint" style="margin-top:12px">everything you register from live will go into this catalogue.</div>` +
+    `<div class="divider"></div>` +
+    `<div class="actions">` +
+    `<button onclick="${bridgeSend("'another'")}">not me, use another key</button> ` +
+    `<button class="btn-primary" onclick="${bridgeSend("'connect'")}">connect</button>` +
+    `</div>`,
   );
 }
 

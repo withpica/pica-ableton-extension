@@ -2,13 +2,21 @@
 
 import type { ExtensionContext } from "@ableton-extensions/sdk";
 import { writeApiKey, clearCredentials } from "./keyStore";
-import { resolveIdentity } from "./identity";
-import { pasteKeyHtml } from "../dialogHtml";
+import { resolveIdentity, destinationLine } from "./identity";
+import { openInBrowser } from "./openBrowser";
+import { pasteKeyHtml, confirmKeyAccountHtml } from "../dialogHtml";
 import { PicaMcpError } from "./mcpClient";
 
 type FetchFn = typeof fetch;
+type OpenFn = (url: string) => Promise<boolean>;
 
 const BASE_URL = "https://withpica.com";
+/** Where a key is made from a browser: sign in, check the account, authorize. */
+export const CONNECT_URL = `${BASE_URL}/connect/ableton`;
+const CONFIRM_W = 420;
+const CONFIRM_H = 300;
+/** Opens of the browser per paste session, so a stuck loop cannot spin. */
+const MAX_PASTE_ROUNDS = 6;
 const CONNECT_W = 420;
 const CONNECT_H = 560;
 const PASTE_W = 400;
@@ -47,22 +55,47 @@ async function persistKey(
   await writeApiKey(storageDir, apiKey, identity ?? undefined);
 }
 
-/** Open the paste-key dialog; persist + return a shaped key, else null. */
+/**
+ * Open the paste-key dialog until a key is saved or the user backs out.
+ *
+ * "open in browser" opens the connect page in the system browser and brings
+ * the dialog back. A shaped key is NOT saved until the user has seen which
+ * account and catalogue it writes into and said connect: a pasted key can come
+ * from any browser session (founder, 2026-10-30). "not me" returns to the
+ * paste dialog. Persists and returns the key, else null.
+ */
 async function promptAndStorePastedKey(
   context: ExtensionContext<"1.0.0">,
   storageDir: string,
   fetchFn: FetchFn,
+  openFn: OpenFn,
 ): Promise<string | null> {
-  const raw = await context.ui.showModalDialog(
-    `data:text/html,${encodeURIComponent(pasteKeyHtml())}`,
-    PASTE_W,
-    PASTE_H,
-  );
-  const parsed = safeParse(raw);
-  const key = typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
-  if (!isKeyShaped(key)) return null;
-  await persistKey(storageDir, key, fetchFn);
-  return key;
+  for (let round = 0; round < MAX_PASTE_ROUNDS; round++) {
+    const raw = await context.ui.showModalDialog(
+      `data:text/html,${encodeURIComponent(pasteKeyHtml(CONNECT_URL))}`,
+      PASTE_W,
+      PASTE_H,
+    );
+    const parsed = safeParse(raw);
+    if (parsed.openBrowser === true) {
+      await openFn(CONNECT_URL);
+      continue;
+    }
+    const key = typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
+    if (!isKeyShaped(key)) return null;
+    const identity = await resolveIdentity(BASE_URL, key, fetchFn);
+    const answer = await context.ui.showModalDialog(
+      `data:text/html,${encodeURIComponent(confirmKeyAccountHtml(destinationLine(identity)))}`,
+      CONFIRM_W,
+      CONFIRM_H,
+    );
+    if (answer === "connect") {
+      await writeApiKey(storageDir, key, identity ?? undefined);
+      return key;
+    }
+    if (answer !== "another") return null;
+  }
+  return null;
 }
 
 /**
@@ -74,6 +107,7 @@ export async function connectAndStoreKey(
   context: ExtensionContext<"1.0.0">,
   storageDir: string,
   fetchFn: FetchFn = fetch,
+  openFn: OpenFn = openInBrowser,
 ): Promise<string | null> {
   const raw = await context.ui.showModalDialog(
     `${BASE_URL}/connect/ableton?host=ableton`,
@@ -86,10 +120,16 @@ export async function connectAndStoreKey(
     await persistKey(storageDir, parsed.apiKey, fetchFn); // Mode A
     return parsed.apiKey;
   }
-  // Only an explicit "open in browser instead" opens the paste field. A plain
-  // cancel / window-close / unparseable result aborts quietly.
+  // "open in browser" (connect page, signed out) opens the system browser on
+  // the connect page, then the paste field; "paste a key" / "open in browser
+  // instead" go straight to the paste field. A plain cancel / window-close /
+  // unparseable result aborts quietly.
+  if (parsed.openBrowser === true) {
+    await openFn(CONNECT_URL);
+    return promptAndStorePastedKey(context, storageDir, fetchFn, openFn);
+  }
   if (parsed.useBrowser === true) {
-    return promptAndStorePastedKey(context, storageDir, fetchFn);
+    return promptAndStorePastedKey(context, storageDir, fetchFn, openFn);
   }
   return null;
 }
