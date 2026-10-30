@@ -8,6 +8,20 @@
     <div class="h">log these stems in pica</div>
     <div class="hint">pick the audio tracks to upload as stems.</div>
     <div class="hint">stems render <b>pre-fx</b>, freeze &amp; flatten a track first to capture it as you hear it. uploading your finished master? <a id="masterlink" target="_blank">upload it here</a>.</div>
+    <div class="label">what to export</div>
+    <div class="stem-row">
+      <select id="range">
+        <option value="whole">whole song</option>
+        <option value="locators">a section, between two locators</option>
+      </select>
+    </div>
+    <div class="stem-row" id="between" style="display:none">
+      <span class="hint">from</span> <select id="from"></select>
+      <span class="hint">to</span> <select id="to"></select>
+    </div>
+    <div class="hint" id="rangehint">to export one section (a verse, a chorus), choose "a section" and pick the locator it starts at and the one it ends at. no locators yet? in the arrangement, click where the section starts and choose create → add locator, then open this window again.</div>
+    <div class="hint" id="rangeerror" style="display:none;color:#E0A070"></div>
+    <div class="label">stems</div>
     <div id="rows"></div>
     <div class="actions">
       <button id="skip">cancel</button>
@@ -15,8 +29,40 @@
     </div>
 
     <script>
-      // Injected by extension.ts: { stems: [{ index, name, label }], masterUrl }.
+      // Injected by extension.ts: { stems: [{ index, name, label }], masterUrl,
+      // locators: [{ index, name }], range?, error? }.
       var prefill = window.__PICA_STEMS__ || { stems: [], masterUrl: "" };
+      var locators = prefill.locators || [];
+      var rangeSel = document.getElementById("range");
+      var fromSel = document.getElementById("from");
+      var toSel = document.getElementById("to");
+      var between = document.getElementById("between");
+      locators.forEach(function (l) {
+        var o = document.createElement("option"); o.value = String(l.index); o.textContent = l.name; fromSel.appendChild(o);
+        var t = document.createElement("option"); t.value = String(l.index); t.textContent = l.name; toSel.appendChild(t);
+      });
+      var endOpt = document.createElement("option"); endOpt.value = "-1"; endOpt.textContent = "end of song"; toSel.appendChild(endOpt);
+      if (!locators.length) {
+        rangeSel.querySelector('option[value="locators"]').disabled = true;
+        document.getElementById("rangehint").textContent =
+          "this set has no locators, so the whole song is exported. to export one section, click in the arrangement where it starts and choose create → add locator (and one where it ends), then open this window again.";
+      }
+      function nextAfter(i) { return locators[i + 1] ? String(i + 1) : "-1"; }
+      fromSel.addEventListener("change", function () { toSel.value = nextAfter(Number(fromSel.value)); });
+      rangeSel.addEventListener("change", function () {
+        between.style.display = rangeSel.value === "locators" ? "" : "none";
+      });
+      var r = prefill.range;
+      if (r && r.mode === "locators" && locators.length) {
+        rangeSel.value = "locators"; between.style.display = "";
+        fromSel.value = String(r.from); toSel.value = String(r.to);
+      } else if (locators.length) {
+        fromSel.value = "0"; toSel.value = nextAfter(0);
+      }
+      if (prefill.error) {
+        var er = document.getElementById("rangeerror");
+        er.textContent = prefill.error; er.style.display = "";
+      }
       var rowsEl = document.getElementById("rows");
       var ml = document.getElementById("masterlink");
       if (ml && prefill.masterUrl) ml.href = prefill.masterUrl; else if (ml) ml.removeAttribute("href");
@@ -55,7 +101,10 @@
           var label = row.querySelector("input").value.trim();
           stems.push({ index: Number(row.dataset.index), include: include, label: label || row.dataset.name });
         });
-        post({ stems: stems });
+        var range = rangeSel.value === "locators"
+          ? { mode: "locators", from: Number(fromSel.value), to: Number(toSel.value) }
+          : { mode: "whole" };
+        post({ stems: stems, range: range });
       });
     </script>
   </body>
