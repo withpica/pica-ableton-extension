@@ -347,3 +347,86 @@ describe("withReconnect", () => {
     expect(onReconnect).not.toHaveBeenCalled();
   });
 });
+
+describe("connectAndStoreKey: device sign-in", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const START_BODY = {
+    device_code: "dev-code",
+    user_code: "BCDF-GHJK",
+    verification_uri: "https://withpica.com/connect/device",
+    verification_uri_complete: "https://withpica.com/connect/device?code=BCDF-GHJK",
+    expires_in: 600,
+    interval: 1,
+  };
+
+  /** Answers by URL: start, then the given poll answers, then /me. */
+  function deviceFetch(polls: unknown[]) {
+    const queue = [...polls];
+    return vi.fn(async (url: string) => {
+      if (url.endsWith("/api/public/connect/device")) return { ok: true, status: 200, json: async () => START_BODY };
+      if (url.endsWith("/api/public/connect/device/token")) {
+        const body = queue.shift() as { api_key?: string };
+        return { ok: !!body?.api_key, status: body?.api_key ? 200 : 400, json: async () => body };
+      }
+      return { ok: true, status: 200, json: async () => ME_PAYLOAD };
+    }) as unknown as typeof fetch;
+  }
+
+  function deviceContext(results: string[]) {
+    const { ctx, showModalDialog } = fakeContext(results);
+    const withinProgressDialog = vi.fn(async (_t: string, _o: unknown, cb: (u: unknown, s: AbortSignal) => unknown) =>
+      cb(async () => {}, new AbortController().signal),
+    );
+    (ctx.ui as unknown as { withinProgressDialog: unknown }).withinProgressDialog = withinProgressDialog;
+    return { ctx, showModalDialog, withinProgressDialog };
+  }
+
+  it("shows the code, opens the approve page, and saves the key once approved", async () => {
+    const openFn = vi.fn(async () => true);
+    const { ctx, showModalDialog, withinProgressDialog } = deviceContext([JSON.stringify({ open: true })]);
+    const f = deviceFetch([{ error: "authorization_pending" }, { api_key: KEY }]);
+    vi.useFakeTimers();
+    const p = connectAndStoreKey(ctx, "/tmp/store", f, openFn);
+    await vi.runAllTimersAsync();
+    const out = await p;
+    vi.useRealTimers();
+    expect(out).toBe(KEY);
+    expect(decodeURIComponent(showModalDialog.mock.calls[0]![0])).toContain("BCDF-GHJK");
+    expect(openFn).toHaveBeenCalledWith("https://withpica.com/connect/device?code=BCDF-GHJK");
+    expect(withinProgressDialog.mock.calls[0]![0]).toContain("BCDF-GHJK");
+    expect(writeApiKey).toHaveBeenCalledWith(
+      "/tmp/store",
+      KEY,
+      expect.objectContaining({ organisationName: "soundslikefez" }),
+    );
+  });
+
+  it("'use a key instead' goes to the paste flow", async () => {
+    const { ctx } = deviceContext([
+      JSON.stringify({ paste: true }),
+      JSON.stringify({ apiKey: KEY }),
+      "connect",
+    ]);
+    expect(await connectAndStoreKey(ctx, "/tmp/store", deviceFetch([]))).toBe(KEY);
+  });
+
+  it("a denied code saves nothing and says why", async () => {
+    const { ctx, showModalDialog } = deviceContext([JSON.stringify({ wait: true }), "ok"]);
+    vi.useFakeTimers();
+    const p = connectAndStoreKey(ctx, "/tmp/store", deviceFetch([{ error: "access_denied" }]));
+    await vi.runAllTimersAsync();
+    const out = await p;
+    vi.useRealTimers();
+    expect(out).toBeNull();
+    expect(writeApiKey).not.toHaveBeenCalled();
+    expect(decodeURIComponent(showModalDialog.mock.calls[1]![0])).toContain("denied");
+  });
+
+  it("cancel on the code window saves nothing and polls nothing", async () => {
+    const { ctx, withinProgressDialog } = deviceContext([JSON.stringify({ cancelled: true })]);
+    expect(await connectAndStoreKey(ctx, "/tmp/store", deviceFetch([]))).toBeNull();
+    expect(withinProgressDialog).not.toHaveBeenCalled();
+  });
+});
+
