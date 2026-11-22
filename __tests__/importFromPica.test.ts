@@ -157,10 +157,10 @@ describe("key", () => {
   const off = { rootNote: 0, scaleName: "Major", scaleMode: false };
   it("is only reported, naming the set's key when scale mode is on", () => {
     expect(keyNote({ key: "A Minor", source: "session" }, { ...off, scaleMode: true })).toBe(
-      "the song is in A Minor; your session is in C Major. ableton doesn't let pica change the key.",
+      "the song is in A minor; your session is in C major. Ableton doesn't let pica change the key.",
     );
-    expect(keyNote({ key: "A Minor", source: "session" }, off)).toBe("the song is in A Minor.");
-    expect(keyNote({ key: "C Major", source: "session" }, { ...off, scaleMode: true })).toBe("the song is in C Major.");
+    expect(keyNote({ key: "A Minor", source: "session" }, off)).toBe("the song is in A minor.");
+    expect(keyNote({ key: "C Major", source: "session" }, { ...off, scaleMode: true })).toBe("the song is in C major.");
     expect(keyNote({ key: "F", source: "measured" }, off)).toBe("the song is in F (measured).");
     expect(keyNote(null, off)).toBeNull();
   });
@@ -211,5 +211,25 @@ describe("download", () => {
   it("names tracks after the stem, optionally with the song title", () => {
     expect(trackName(file(), "Wave", false)).toBe("drums");
     expect(trackName(file(), "Wave", true)).toBe("Wave — drums");
+  });
+});
+
+import { fileFailureReason, importErrorMessage } from "../src/pica/importFromPica";
+
+describe("what a failure says (never raw error text)", () => {
+  it("one file: a fixed phrase per step", () => {
+    expect(fileFailureReason("download")).toBe("the download didn't work");
+    expect(fileFailureReason("add")).toBe("Ableton couldn't add it");
+    expect(fileFailureReason(null)).toBe("something went wrong");
+  });
+  it("the whole import: pica's own message, else a fixed line", () => {
+    expect(importErrorMessage('API request failed: 404 {"error":"work not found"}')).toBe("couldn't import: work not found");
+    for (const raw of [
+      "import may only read from pica (pica_works_update refused)",
+      "PICA returned HTTP 500 for pica_works_query: <html>",
+      "Network error calling /api/x: ECONNRESET",
+    ]) {
+      expect(importErrorMessage(raw)).toBe("couldn't import: something went wrong. try again, or open the song in pica.");
+    }
   });
 });

@@ -33,6 +33,9 @@ import {
   removeTemp,
   trackName,
   ImportCancelled,
+  fileFailureReason,
+  importErrorMessage,
+  type ImportStep,
   type ImportFile,
   type ReadOnlyClient,
 } from "./pica/importFromPica";
@@ -165,7 +168,8 @@ export function activate(activation: ActivationContext): void {
   const IMPORT_ID = "pica.import";
   context.commands.registerCommand(IMPORT_ID, () => {
     void runImport(context).catch((e) => {
-      void showError(context, e instanceof Error ? e.message : String(e));
+      console.error("[pica import]", e);
+      void showError(context, importErrorMessage(e instanceof Error ? e.message : String(e)));
     });
   });
   void context.ui.registerContextMenuAction("AudioTrack", "Import from PICA…", IMPORT_ID);
@@ -1176,7 +1180,7 @@ async function runImport(context: ExtensionContext<"1.0.0">): Promise<void> {
   // 1. Which song.
   const works = await read((c) => fetchWorkChoices(c));
   if (works.length === 0) {
-    await showError(context, "your pica catalog has no songs yet.");
+    await showError(context, "your pica catalogue has no songs yet.");
     return;
   }
   const songAns = safeParse(
@@ -1189,7 +1193,7 @@ async function runImport(context: ExtensionContext<"1.0.0">): Promise<void> {
   if (songAns.cancelled || !songAns.value?.trim()) return;
   const work = workForPick(songAns.value, works);
   if (!work) {
-    await showError(context, `no single song in your catalog matches "${songAns.value.trim()}". pick one from the list.`);
+    await showError(context, `no single song in your catalogue matches "${songAns.value.trim()}". pick one from the list.`);
     return;
   }
 
@@ -1293,7 +1297,9 @@ async function runImport(context: ExtensionContext<"1.0.0">): Promise<void> {
       }
       const at = (part: number) => Math.round(((i + part) / chosen.length) * 100);
       let temp = "";
+      let step: ImportStep | null = null;
       try {
+        step = "download";
         await update(`downloading ${f.label} (${i + 1} of ${chosen.length})…`, at(0));
         const url = await read((c) => c.playbackUrl(f.id));
         let last = -1;
@@ -1307,6 +1313,7 @@ async function runImport(context: ExtensionContext<"1.0.0">): Promise<void> {
             }
           },
         });
+        step = "add";
         await update(`adding ${f.label} to the set…`, at(0.95));
         const imported = await context.resources.importIntoProject(temp);
         const track = await song.createAudioTrack();
@@ -1319,13 +1326,14 @@ async function runImport(context: ExtensionContext<"1.0.0">): Promise<void> {
           cancelled = true;
           break;
         }
-        lines.push(`${f.label}: not imported (${e instanceof Error ? e.message : String(e)}).`);
+        console.error("[pica import]", f.label, e);
+        lines.push(`${f.label}: not imported (${fileFailureReason(step)}).`);
       } finally {
         if (temp) await removeTemp(temp);
       }
     }
   });
-  if (cancelled) lines.push("cancelled: anything listed as imported stays in the set; the rest was not downloaded.");
+  if (cancelled) lines.push("cancelled. the files listed as imported stay in the set; the rest weren't downloaded.");
 
   // 6. Report.
   if (plan.kind === "unknown") lines.push("tempo unknown, so the stems play as recorded.");

@@ -528,7 +528,7 @@ export function importSongHtml(labels: readonly string[]): string {
   const options = labels.map((l) => `<option value="${escapeHtml(l)}"></option>`).join("");
   return withFlatStyle(
     `<div class="h">pica / import a song</div>` +
-    `<div class="hint">bring a song's stems from your pica catalog into this set. nothing in pica changes.</div>` +
+    `<div class="hint">bring a song's stems from your pica catalogue into this set. nothing in pica changes.</div>` +
     `<div class="label">song</div>` +
     `<input class="input" id="w" list="works" autocomplete="off" placeholder="start typing a song title">` +
     `<datalist id="works">${options}</datalist>` +

@@ -297,15 +297,22 @@ export function keyNote(
   session: { rootNote: number; scaleName: string; scaleMode: boolean },
 ): string | null {
   if (!song) return null;
-  const songPart = `the song is in ${song.key}${song.source === "measured" ? " (measured)" : ""}`;
+  const songKeyText = proseKey(song.key);
+  const songPart = `the song is in ${songKeyText}${song.source === "measured" ? " (measured)" : ""}`;
   const sessionKey =
     session.scaleMode && session.scaleName.trim()
-      ? `${NOTE_NAMES[((Math.trunc(session.rootNote) % 12) + 12) % 12]} ${session.scaleName.trim()}`
+      ? proseKey(`${NOTE_NAMES[((Math.trunc(session.rootNote) % 12) + 12) % 12]} ${session.scaleName.trim()}`)
       : "";
-  if (sessionKey && sessionKey.toLowerCase() !== song.key.toLowerCase()) {
-    return `${songPart}; your session is in ${sessionKey}. ableton doesn't let pica change the key.`;
+  if (sessionKey && sessionKey.toLowerCase() !== songKeyText.toLowerCase()) {
+    return `${songPart}; your session is in ${sessionKey}. Ableton doesn't let pica change the key.`;
   }
   return `${songPart}.`;
+}
+
+/** "A Minor" → "A minor": the note name as it is, the scale in lowercase. */
+function proseKey(key: string): string {
+  const [note, ...rest] = key.trim().split(/\s+/);
+  return [note, ...rest.map((w) => w.toLowerCase())].filter(Boolean).join(" ");
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +324,34 @@ export function tempFileName(file: ImportFile): string {
   const ext = (/\.([a-z0-9]{2,5})$/i.exec(file.filename)?.[1] ?? "wav").toLowerCase();
   const base = file.label.replace(/[^a-z0-9 _-]+/gi, "").trim().replace(/\s+/g, "-").slice(0, 60) || "audio";
   return `pica-${base}-${file.id.slice(0, 8)}.${ext}`;
+}
+
+/** Why one file was not imported, in fixed words (the raw error is logged, never shown). */
+export type ImportStep = "download" | "add";
+export function fileFailureReason(step: ImportStep | null): string {
+  if (step === "download") return "the download didn't work";
+  if (step === "add") return "Ableton couldn't add it";
+  return "something went wrong";
+}
+
+const IMPORT_ERROR_FALLBACK = "couldn't import: something went wrong. try again, or open the song in pica.";
+
+/**
+ * What a failed import says: the API's own message when PICA sent one (nested
+ * as "... {json}" with an `error`), otherwise a fixed line. Never transport
+ * text, a guard's wording or a stack.
+ */
+export function importErrorMessage(rawMessage: string): string {
+  const start = rawMessage.indexOf("{");
+  if (start >= 0) {
+    try {
+      const p = JSON.parse(rawMessage.slice(start));
+      if (typeof p.error === "string" && p.error.trim()) return `couldn't import: ${p.error.trim()}`;
+    } catch {
+      /* not JSON */
+    }
+  }
+  return IMPORT_ERROR_FALLBACK;
 }
 
 export class ImportCancelled extends Error {
