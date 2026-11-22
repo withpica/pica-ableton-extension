@@ -22,6 +22,16 @@ export type DeliverResult =
 
 const FIRST_EXTERNAL = "FIRST_EXTERNAL_SEND_CONFIRMATION_REQUIRED";
 
+/**
+ * The address in what the recipient field holds: a typed address, or a picked
+ * contact's "Name <email>".
+ */
+export function recipientEmail(field: string): string {
+  const t = field.trim();
+  const m = /<([^<>\s]+)>$/.exec(t);
+  return m ? m[1]!.trim() : t;
+}
+
 /** Basic deliverability check: non-empty, exactly one @, a dot in the domain. */
 export function isDeliverableEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -120,4 +130,85 @@ export function friendlyDeliverError(rawMessage: string, suggestion?: string): s
     default:
       return inner || suggestion || rawMessage || "delivery failed.";
   }
+}
+
+export interface LinkArgs {
+  workId: string;
+  workTitle: string;
+  note?: string;
+  allowDownload: boolean;
+  includedFileIds?: string[];
+  /** Injected for tests; defaults to now. */
+  now?: Date;
+}
+
+export type LinkResult =
+  | { state: "made"; shareUrl: string; linkId: string | null }
+  | { state: "error"; message: string; code?: string };
+
+/** The same 30 days an emailed share lasts (pica_share_send's default). */
+const LINK_DAYS = 30;
+
+/**
+ * Make a share link for a work and email nobody (ADR-259 Stage 5, Piece C).
+ *
+ * The link is a share_links row like the one an emailed share makes, with the
+ * same choices: download on or off, the chosen stems (or every file when none
+ * were picked), streaming on, 30 days. So it is tracked (views are counted)
+ * and can be turned off in PICA (the song page's sharing section, "turn off").
+ */
+export async function createWorkLink(deps: DeliverDeps, args: LinkArgs): Promise<LinkResult> {
+  const now = args.now ?? new Date();
+  const expires = new Date(now.getTime() + LINK_DAYS * 24 * 60 * 60 * 1000);
+  const picked = args.includedFileIds && args.includedFileIds.length > 0;
+  const payload: Record<string, unknown> = {
+    work_id: args.workId,
+    name: args.workTitle.trim() || "shared from Ableton",
+    personal_message: args.note?.trim() || undefined,
+    expires_at: expires.toISOString(),
+    allow_download: args.allowDownload,
+    allow_streaming: true,
+    include_all_files: !picked,
+    ...(picked ? { included_file_ids: args.includedFileIds } : {}),
+  };
+
+  let r: any;
+  try {
+    r = await deps.client.callTool("pica_share_links_create", payload);
+  } catch (e) {
+    return { state: "error", message: linkErrorMessage(e instanceof PicaMcpError ? e.message : ""), code: e instanceof PicaMcpError ? e.code : undefined };
+  }
+  if (r && typeof r === "object" && r.error_code) {
+    const msg = typeof r.error === "string" ? r.error : "";
+    return { state: "error", message: linkErrorMessage(msg, r.suggestion), code: r.error_code };
+  }
+  const shareUrl = typeof r?.share_url === "string" ? r.share_url : "";
+  // Never report a link that isn't there: no share_url is a failure.
+  if (!shareUrl) {
+    return { state: "error", message: "pica didn't send the link back. look under sharing on the song in pica." };
+  }
+  return { state: "made", shareUrl, linkId: typeof r?.id === "string" ? r.id : null };
+}
+
+const LINK_ERROR_FALLBACK = "something went wrong. try again, or make the link on the song in pica.";
+
+/**
+ * What a failed link says: the API's own message when it has one (nested in an
+ * "API request failed: <status> {json}" message, or returned as `error`), or a
+ * plain fallback. Never the raw transport text (status lines, JSON, stack).
+ */
+export function linkErrorMessage(rawMessage: string, suggestion?: string): string {
+  const start = rawMessage.indexOf("{");
+  if (start >= 0) {
+    try {
+      const p = JSON.parse(rawMessage.slice(start));
+      if (typeof p.error === "string" && p.error.trim()) return p.error.trim();
+    } catch {
+      /* not JSON */
+    }
+    return suggestion?.trim() || LINK_ERROR_FALLBACK;
+  }
+  const plain = rawMessage.trim();
+  if (plain && !/^(PICA returned HTTP|Network error|JSON-RPC|Tool )/.test(plain)) return plain;
+  return suggestion?.trim() || LINK_ERROR_FALLBACK;
 }

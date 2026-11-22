@@ -84,3 +84,61 @@ export async function fetchPeopleCandidates(client: PicaMcpClient): Promise<Pers
   const seen = new Set<string>();
   return all.filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
 }
+
+/** A person in the caller's own catalogue with an email on file, for "share with…". */
+export interface EmailContact {
+  name: string;
+  email: string;
+}
+
+/**
+ * Shape a pica_people_query result into contacts that have an email.
+ * Drops rows without a name or a usable email; one row per email
+ * (case-insensitive), first wins.
+ */
+export function toEmailContacts(raw: unknown): EmailContact[] {
+  const obj = raw as { people?: unknown; items?: unknown; data?: unknown } | null;
+  const list = Array.isArray(raw)
+    ? raw
+    : (obj?.people ?? obj?.items ?? (obj?.data as { people?: unknown })?.people ?? []);
+  if (!Array.isArray(list)) return [];
+  const out: EmailContact[] = [];
+  const seen = new Set<string>();
+  for (const p of list as Array<Record<string, unknown>>) {
+    const name = typeof p?.name === "string" ? p.name.trim() : "";
+    const email = typeof p?.email === "string" ? p.email.trim() : "";
+    if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name, email });
+  }
+  return out;
+}
+
+/**
+ * The caller's own catalogue's people with an email on file (pica_people_query
+ * is scoped to the key's organisation, read:people). Used only to fill in the
+ * share dialog's recipient: held in memory for that one dialog, never written
+ * to the extension's storage or logged. Best-effort: callers catch and fall
+ * back to a plain email field. Paginated with the same cap as the typeahead.
+ */
+export async function fetchEmailContacts(client: PicaMcpClient): Promise<EmailContact[]> {
+  const PAGE = 200;
+  const CAP = 2000;
+  const all: EmailContact[] = [];
+  for (let offset = 0; offset < CAP; offset += PAGE) {
+    const raw = await client.callTool("pica_people_query", { has_email: true, limit: PAGE, offset });
+    const obj = raw as { people?: unknown; items?: unknown; data?: unknown } | null;
+    const rows = Array.isArray(raw)
+      ? raw
+      : (obj?.people ?? obj?.items ?? (obj?.data as { people?: unknown })?.people ?? []);
+    all.push(...toEmailContacts(rows));
+    if (!Array.isArray(rows) || rows.length < PAGE) break;
+  }
+  const seen = new Set<string>();
+  return all.filter((c) => {
+    const k = c.email.toLowerCase();
+    return seen.has(k) ? false : (seen.add(k), true);
+  });
+}

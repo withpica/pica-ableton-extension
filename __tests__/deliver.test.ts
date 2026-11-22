@@ -128,3 +128,88 @@ describe("friendlyDeliverError", () => {
     expect(friendlyDeliverError("plain failure")).toBe("plain failure");
   });
 });
+
+import { createWorkLink } from "../src/pica/deliver";
+
+describe("createWorkLink (a link, no email)", () => {
+  const now = new Date("2026-11-22T12:00:00Z");
+  const linkBase = { workId: "w1", workTitle: "Wave", allowDownload: true, now };
+
+  it("makes a work link like an emailed share: every file, download on, 30 days, no recipient", async () => {
+    const client = fakeClient(() => ({ id: "l1", share_url: "https://withpica.com/share/abc" }));
+    const r = await createWorkLink({ client }, { ...linkBase, note: "  rough mix  " });
+    expect(r).toEqual({ state: "made", shareUrl: "https://withpica.com/share/abc", linkId: "l1" });
+    const [name, args] = client.callTool.mock.calls[0]!;
+    expect(name).toBe("pica_share_links_create");
+    expect(args).toEqual({
+      work_id: "w1",
+      name: "Wave",
+      personal_message: "rough mix",
+      expires_at: "2026-12-22T12:00:00.000Z",
+      allow_download: true,
+      allow_streaming: true,
+      include_all_files: true,
+    });
+    expect(args).not.toHaveProperty("sent_to_emails");
+  });
+
+  it("carries the chosen stems and download off", async () => {
+    const client = fakeClient(() => ({ share_url: "https://withpica.com/share/x" }));
+    await createWorkLink({ client }, { ...linkBase, allowDownload: false, includedFileIds: ["f1", "f2"] });
+    const args = client.callTool.mock.calls[0]![1];
+    expect(args.allow_download).toBe(false);
+    expect(args.include_all_files).toBe(false);
+    expect(args.included_file_ids).toEqual(["f1", "f2"]);
+  });
+
+  it("never reports a link that wasn't returned", async () => {
+    const client = fakeClient(() => ({ id: "l1" }));
+    const r = await createWorkLink({ client }, linkBase);
+    expect(r.state).toBe("error");
+  });
+
+  it("surfaces a refusal, thrown or returned", async () => {
+    const thrown = fakeClient(() => {
+      throw new PicaMcpError("PICA returned HTTP 403 for pica_share_links_create: nope", "403");
+    });
+    expect((await createWorkLink({ client: thrown }, linkBase)).state).toBe("error");
+    const returned = fakeClient(() => ({ error_code: "SHARE_ERROR", error: "work not found" }));
+    expect(await createWorkLink({ client: returned }, linkBase)).toMatchObject({
+      state: "error",
+      message: "work not found",
+    });
+  });
+});
+
+import { recipientEmail } from "../src/pica/deliver";
+
+describe("recipientEmail", () => {
+  it("reads the address out of a picked contact, or takes a typed one as is", () => {
+    expect(recipientEmail("Sarah Holt <sarah@band.com>")).toBe("sarah@band.com");
+    expect(recipientEmail("  tom@band.com ")).toBe("tom@band.com");
+    expect(recipientEmail("Tom <not an email>")).toBe("Tom <not an email>");
+    expect(recipientEmail("")).toBe("");
+  });
+});
+
+import { linkErrorMessage } from "../src/pica/deliver";
+
+describe("linkErrorMessage (never raw error text)", () => {
+  it("uses the API's own message when there is one", () => {
+    expect(linkErrorMessage('API request failed: 404 {"error":"work not found"}')).toBe("work not found");
+    expect(linkErrorMessage("work not found")).toBe("work not found");
+  });
+  it("falls back to plain words for transport failures", () => {
+    for (const raw of [
+      "PICA returned HTTP 500 for pica_share_links_create: <html>",
+      "Network error calling pica_share_links_create: ECONNRESET",
+      'API request failed: 500 {"nope":1}',
+      "",
+    ]) {
+      const m = linkErrorMessage(raw);
+      expect(m).not.toContain("HTTP");
+      expect(m).not.toContain("{");
+      expect(m).toBe("something went wrong. try again, or make the link on the song in pica.");
+    }
+  });
+});

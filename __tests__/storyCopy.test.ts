@@ -6,6 +6,7 @@ import {
   stemPhaseLabel,
   registerPhaseLabel,
   deliverPhaseLabel,
+  linkPhaseLabel,
   creditsPhaseLabel,
   writersPhaseLabel,
   IDLE_LINES,
@@ -118,5 +119,11 @@ describe("round-trip phase labels", () => {
     expect(obeysCopyInvariants(deliverPhaseLabel("x", "y"))).toBe(true);
     expect(obeysCopyInvariants(creditsPhaseLabel())).toBe(true);
     expect(obeysCopyInvariants(writersPhaseLabel("x"))).toBe(true);
+  });
+});
+
+describe("linkPhaseLabel", () => {
+  it("says a link is being made, not that anything is sent", () => {
+    expect(linkPhaseLabel(" Wave ")).toBe('making a link for "Wave"…');
   });
 });

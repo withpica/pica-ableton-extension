@@ -270,29 +270,60 @@ export function destinationRow(destination: string): string {
   );
 }
 
-/** Share dialog: email + optional note + allow-download toggle.
- *  Bridges {cancelled:true} or {email, note, allowDownload}. */
-export function deliverHtml(workTitle: string, destination?: string): string {
+/** Share dialog: email (with the catalogue's known contacts suggested) +
+ *  optional note + allow-download toggle, and a "make a link" choice that
+ *  emails nobody. Bridges {cancelled:true}, {email, note, allowDownload}, or
+ *  {mode:'link', note, allowDownload}. */
+export function deliverHtml(
+  workTitle: string,
+  destination?: string,
+  contacts: ReadonlyArray<{ name: string; email: string }> = [],
+): string {
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
   const sendJs = bridgeSend(
     "JSON.stringify({email:document.getElementById('e').value.trim()," +
       "note:document.getElementById('n').value.trim()," +
       "allowDownload:document.getElementById('d').checked})",
   );
+  const linkJs = bridgeSend(
+    "JSON.stringify({mode:'link'," +
+      "note:document.getElementById('n').value.trim()," +
+      "allowDownload:document.getElementById('d').checked})",
+  );
+  // Known contacts fill the field as "Name <email>" (recipientEmail reads the
+  // address back out). Name and address are both in the value because
+  // WebKit's datalist matches what is typed against the value only.
+  const datalist =
+    contacts.length > 0
+      ? `<datalist id="contacts">` +
+        contacts
+          .map((c) => `<option value="${escapeHtml(`${c.name} <${c.email}>`)}"></option>`)
+          .join("") +
+        `</datalist>`
+      : "";
   return withFlatStyle(
     `<div class="h">pica / share "${escapeHtml(workTitle)}"</div>` +
-    `<div class="hint">share this work with someone by email. they get a private link, revocable, expires in 30 days.</div>` +
+    `<div class="hint">share this work: email it to someone, or make a link to pass on. links last 30 days, and you can turn one off sooner.</div>` +
     (destination ? destinationRow(destination) : "") +
     `<div class="label">recipient</div>` +
-    `<input class="input" id="e" placeholder="email address">` +
+    `<input class="input" id="e" placeholder="${contacts.length > 0 ? "name or email address" : "email address"}"` +
+    `${contacts.length > 0 ? ' list="contacts" autocomplete="off"' : ""}>` +
+    datalist +
     `<div class="label">message (optional)</div>` +
     `<textarea class="textarea" id="n" rows="3" placeholder="add a note"></textarea>` +
     `<label class="check"><input type="checkbox" id="d" checked> allow download of attached audio</label>` +
     `<div class="divider"></div>` +
     `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button onclick="${escapeHtml(linkJs)}">just make a link</button> ` +
     `<button class="btn-primary" onclick="${escapeHtml(sendJs)}">share</button></div>`,
   );
 }
+
+/** Body of the panel shown once a link is made (Piece C): nobody was emailed,
+ *  and where to turn the link off. */
+export const LINK_MADE_BODY =
+  "no one was emailed. anyone with this link can open it for 30 days. " +
+  "to turn it off sooner, open the song in pica and press turn off on the link, under sharing.";
 
 /** Stem picker: one include/skip row per stem, before the deliver dialog.
  *  Bridges {ids: string[]} (the chosen stem ids) or {cancelled:true}. */

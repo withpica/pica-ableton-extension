@@ -52,6 +52,11 @@ export function deliverPhaseLabel(title: string, recipient?: string): string {
   return to ? `sending "${t}" to ${to}…` : `sending "${t}"…`;
 }
 
+/** Progress line while a link is made for a work (no one is emailed). */
+export function linkPhaseLabel(title: string): string {
+  return `making a link for "${title.trim()}"…`;
+}
+
 export function creditsPhaseLabel(): string {
   return "crediting who played what…";
 }
