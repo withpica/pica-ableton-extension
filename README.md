@@ -167,6 +167,23 @@ PICA and press **turn off** on the link, under **sharing**. The first time you
 email someone who isn't in your catalog or on PICA, PICA asks you to confirm
 the address.
 
+**Import from PICA.** Right-click a track → **Import from PICA…** to bring a
+song's audio from your catalog into the open Set. Pick the song (and the
+recording, if it has more than one), tick the files you want (every stem is
+ticked; the master is offered but not ticked), and each one lands on its own new
+track, all starting at bar 1 so they stay in sync. Nothing in PICA changes.
+
+- **Tempo.** If the song was registered from Ableton, PICA knows the exact tempo
+  of that session; otherwise it uses the tempo measured from the audio. An empty
+  Set takes the song's tempo. If your Set already has clips at another tempo,
+  you choose: use the song's tempo (the stems play exactly as recorded), or keep
+  your Set's tempo and stretch the stems (warping, which may not sound perfect).
+  If PICA doesn't know the tempo, the stems come in as recorded.
+- **Key.** Ableton doesn't let an extension change the Set's key or repitch
+  audio, so the import only tells you the song's key next to your Set's.
+- The end report lists what came in and links to the song in PICA, with its
+  credits.
+
 **The master isn't rendered here.** The Extensions SDK can only render an audio
 track **before its effects** (`renderPreFxAudio`), and has no way to render the
 master bus or a full mixdown. So stems come from the extension; the master is

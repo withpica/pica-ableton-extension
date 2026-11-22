@@ -514,3 +514,57 @@ describe("deliverHtml: known contacts and a plain link", () => {
     expect(LINK_MADE_BODY).toContain("under sharing");
   });
 });
+
+import {
+  importSongHtml,
+  importRecordingHtml,
+  importFilesHtml,
+  importTempoHtml,
+  importReportHtml,
+} from "../src/dialogHtml";
+
+describe("import dialogs", () => {
+  it("song: suggests the catalogue's songs, escaped", () => {
+    const html = importSongHtml(['Wave "live" — Ivy']);
+    expect(html).toContain('list="works"');
+    expect(html).toContain('<option value="Wave &quot;live&quot; — Ivy"></option>');
+    expect(html).toContain("nothing in pica changes");
+  });
+
+  it("recording: one choice per recording, the first chosen", () => {
+    const html = importRecordingHtml("Wave", [
+      { id: "r1", title: "Wave", versionType: "original" },
+      { id: "r2", title: "Wave (remix)", versionType: "remix" },
+    ]);
+    expect(html).toContain('value="r1" checked');
+    expect(html).not.toContain('value="r2" checked');
+  });
+
+  it("files: stems ticked, the master not, each with its length", () => {
+    const html = importFilesHtml("Wave", [
+      { id: "s1", label: "drums", length: "3:07", master: false },
+      { id: "m1", label: "wave", length: "3:07", master: true },
+    ]);
+    expect(html).toContain('value="s1" checked');
+    expect(html).toContain('value="m1">');
+    expect(html).toContain("wave (master)");
+    expect(html).toContain("3:07");
+    expect(html).toContain("all starting at bar 1");
+  });
+
+  it("tempo: the song's tempo is the default, stretching is labelled as such", () => {
+    const html = importTempoHtml(92, "session", 120);
+    expect(html).toContain('value="song" checked');
+    expect(html).toContain("use the song's tempo (92 bpm)");
+    expect(html).toContain("keep this set's tempo (120 bpm) and stretch the stems");
+    expect(html).toContain("from the session it was made in");
+    expect(importTempoHtml(119.5, "measured", 120)).toContain("measured from the audio");
+  });
+
+  it("report: the lines, and the link back to the song's credits", () => {
+    const html = importReportHtml(["drums: imported."], "https://withpica.com/inspect/works/w1");
+    expect(html).toContain("drums: imported.");
+    expect(html).toContain("credits on this song");
+    expect(html).toContain('href="https://withpica.com/inspect/works/w1"');
+  });
+});

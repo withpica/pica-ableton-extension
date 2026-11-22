@@ -1,6 +1,6 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
-import { initialize, type ActivationContext, type ExtensionContext } from "@ableton-extensions/sdk";
+import { initialize, WarpMode, type ActivationContext, type ExtensionContext } from "@ableton-extensions/sdk";
 import interfaceHtml from "../ui/interface.html";
 import creditsHtml from "../ui/credits.html";
 import writersHtml from "../ui/writers.html";
@@ -14,6 +14,28 @@ const audioHtmlFlat = injectFlatStyle(audioHtml);
 import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { PicaMcpClient } from "./pica/mcpClient";
+import {
+  readOnly,
+  fetchWorkChoices,
+  workLabel,
+  workForPick,
+  toRecordingChoices,
+  toImportFiles,
+  filesForRecording,
+  formatLength,
+  songTempo,
+  songKey,
+  tempoPlan,
+  tempoChoice,
+  keyNote,
+  tempFileName,
+  downloadToFile,
+  removeTemp,
+  trackName,
+  ImportCancelled,
+  type ImportFile,
+  type ReadOnlyClient,
+} from "./pica/importFromPica";
 import { readApiKey, readCredentials, keyPrefix } from "./pica/keyStore";
 import { ensureIdentity, destinationLine } from "./pica/identity";
 import { readSong, type SongLike } from "./session/read";
@@ -57,6 +79,11 @@ import {
   titlePromptHtml,
   deliverHtml,
   LINK_MADE_BODY,
+  importSongHtml,
+  importRecordingHtml,
+  importFilesHtml,
+  importTempoHtml,
+  importReportHtml,
   deliverConfirmHtml,
   stemsReportHtml,
   shareStemsHtml,
@@ -132,6 +159,17 @@ export function activate(activation: ActivationContext): void {
   });
   void context.ui.registerContextMenuAction("AudioTrack", "Share with… (PICA)", DELIVER_ID);
   void context.ui.registerContextMenuAction("MidiTrack", "Share with… (PICA)", DELIVER_ID);
+
+  // Import from PICA: bring a song's stems from the catalogue into this Set.
+  // Read-only on PICA (src/pica/importFromPica.ts READ_ONLY_TOOLS).
+  const IMPORT_ID = "pica.import";
+  context.commands.registerCommand(IMPORT_ID, () => {
+    void runImport(context).catch((e) => {
+      void showError(context, e instanceof Error ? e.message : String(e));
+    });
+  });
+  void context.ui.registerContextMenuAction("AudioTrack", "Import from PICA…", IMPORT_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Import from PICA…", IMPORT_ID);
 
   // ADR-259: the deliberate route to "who am I connected as", and the only way
   // to change account or sign out without editing the filesystem. Until this
@@ -1098,4 +1136,204 @@ async function runReportFollowOn(
   } else {
     await runDeliver(context, run, workId, workTitle, destination);
   }
+}
+
+const IMPORT_W = 480;
+const IMPORT_SONG_H = 300;
+const IMPORT_FILES_H = 520;
+const IMPORT_TEMPO_H = 360;
+const IMPORT_REPORT_H = 460;
+
+/**
+ * Import from PICA: which song → which recording (only when there is more
+ * than one) → which files → tempo (only when it matters) → download, import,
+ * one new track per file at bar 1 → report. Writes nothing to PICA.
+ */
+async function runImport(context: ExtensionContext<"1.0.0">): Promise<void> {
+  const storageDir = context.environment.storageDirectory;
+  const tempDir = context.environment.tempDirectory;
+  if (!storageDir || !tempDir) {
+    await showError(context, "no storage or temp folder is available, so nothing can be imported.");
+    return;
+  }
+  let apiKey = await readApiKey(storageDir);
+  if (!apiKey) {
+    apiKey = await connectAndStoreKey(context, storageDir);
+    if (!apiKey) return;
+  }
+  let currentKey = apiKey!;
+  const read = <T>(fn: (c: ReadOnlyClient) => Promise<T>) =>
+    withReconnect(
+      context,
+      storageDir,
+      (key: string) => fn(readOnly(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key }))),
+      currentKey,
+      (fresh) => {
+        currentKey = fresh;
+      },
+    );
+
+  // 1. Which song.
+  const works = await read((c) => fetchWorkChoices(c));
+  if (works.length === 0) {
+    await showError(context, "your pica catalog has no songs yet.");
+    return;
+  }
+  const songAns = safeParse(
+    await context.ui.showModalDialog(
+      `data:text/html,${encodeURIComponent(importSongHtml(works.map(workLabel)))}`,
+      IMPORT_W,
+      IMPORT_SONG_H,
+    ),
+  ) as { cancelled?: boolean; value?: string };
+  if (songAns.cancelled || !songAns.value?.trim()) return;
+  const work = workForPick(songAns.value, works);
+  if (!work) {
+    await showError(context, `no single song in your catalog matches "${songAns.value.trim()}". pick one from the list.`);
+    return;
+  }
+
+  // 2. Which recording, and its files.
+  const [recordings, files, workMeta] = await read(async (c) => {
+    const recs = toRecordingChoices(await c.read("pica_recordings_query", { work_id: work.id, limit: 50 }));
+    const fs = toImportFiles(await c.read("pica_audio_query", { work_id: work.id, limit: 200 }));
+    const inspected = (await c.read("pica_works_inspect", { id: work.id, sections: ["basic"] }).catch(
+      () => null,
+    )) as { work?: { metadata?: unknown } } | null;
+    return [recs, fs, inspected?.work?.metadata ?? null] as const;
+  });
+  let recordingId: string | null = null;
+  if (recordings.length > 1) {
+    await yieldBetweenModals();
+    const recAns = safeParse(
+      await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(importRecordingHtml(work.title, recordings))}`,
+        IMPORT_W,
+        Math.min(520, 200 + recordings.length * 34),
+      ),
+    ) as { cancelled?: boolean; id?: string };
+    if (recAns.cancelled || !recAns.id) return;
+    recordingId = recAns.id;
+  } else if (recordings.length === 1) {
+    recordingId = recordings[0]!.id;
+  }
+  const { stems, master } = filesForRecording(files, recordingId);
+  const offered = [...stems, ...(master ? [master] : [])];
+  if (offered.length === 0) {
+    await showLink(
+      context,
+      "pica — nothing to import",
+      `"${work.title}" has no audio in pica yet.`,
+      `${BASE_URL}/inspect/works/${work.id}`,
+    );
+    return;
+  }
+
+  // 3. Which files.
+  await yieldBetweenModals();
+  const filesAns = safeParse(
+    await context.ui.showModalDialog(
+      `data:text/html,${encodeURIComponent(
+        importFilesHtml(
+          work.title,
+          offered.map((f) => ({
+            id: f.id,
+            label: f.label,
+            length: formatLength(f.durationSeconds),
+            master: f === master,
+          })),
+        ),
+      )}`,
+      IMPORT_W,
+      IMPORT_FILES_H,
+    ),
+  ) as { cancelled?: boolean; ids?: string[]; prefix?: boolean };
+  if (filesAns.cancelled) return;
+  const chosen = offered.filter((f) => (filesAns.ids ?? []).includes(f.id));
+  if (chosen.length === 0) {
+    await showError(context, "nothing was ticked, so nothing was imported.");
+    return;
+  }
+
+  // 4. Tempo, asked only when it matters; the key is only reported.
+  const song = context.application.song;
+  const sessionHasContent = song.tracks.some((t) => t.arrangementClips.length > 0);
+  const tempo = songTempo(workMeta, files);
+  const plan = tempoPlan(tempo, song.tempo, sessionHasContent);
+  let answer: "song" | "session" | undefined;
+  if (plan.kind === "ask") {
+    await yieldBetweenModals();
+    const tAns = safeParse(
+      await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(importTempoHtml(plan.song.bpm, plan.song.source, plan.sessionBpm))}`,
+        IMPORT_W,
+        IMPORT_TEMPO_H,
+      ),
+    ) as { cancelled?: boolean; tempo?: string };
+    if (tAns.cancelled) return;
+    answer = tAns.tempo === "session" ? "session" : "song";
+  }
+  const choice = tempoChoice(plan, answer);
+  const keyLine = keyNote(songKey(workMeta, files), {
+    rootNote: song.rootNote,
+    scaleName: song.scaleName,
+    scaleMode: song.scaleMode,
+  });
+
+  // 5. Download, import into the project, one new track per file at bar 1.
+  if (choice.setTempo !== null) song.tempo = choice.setTempo;
+  const lines: string[] = [];
+  let cancelled = false;
+  await context.ui.withinProgressDialog(`importing "${work.title}"…`, { progress: 0 }, async (update, signal) => {
+    for (let i = 0; i < chosen.length; i++) {
+      const f = chosen[i]!;
+      if (signal.aborted) {
+        cancelled = true;
+        break;
+      }
+      const at = (part: number) => Math.round(((i + part) / chosen.length) * 100);
+      let temp = "";
+      try {
+        await update(`downloading ${f.label} (${i + 1} of ${chosen.length})…`, at(0));
+        const url = await read((c) => c.playbackUrl(f.id));
+        let last = -1;
+        temp = await downloadToFile(fetch, url, tempDir, tempFileName(f), {
+          signal,
+          onProgress: (fr) => {
+            const pct = fr === null ? at(0) : at(fr * 0.9);
+            if (pct !== last) {
+              last = pct;
+              void update(`downloading ${f.label} (${i + 1} of ${chosen.length})…`, pct);
+            }
+          },
+        });
+        await update(`adding ${f.label} to the set…`, at(0.95));
+        const imported = await context.resources.importIntoProject(temp);
+        const track = await song.createAudioTrack();
+        track.name = trackName(f, work.title, filesAns.prefix === true);
+        const clip = await track.createAudioClip({ filePath: imported, startTime: 0, isWarped: choice.warp });
+        if (choice.warp) clip.warpMode = WarpMode.Complex;
+        lines.push(`${f.label}: imported.`);
+      } catch (e) {
+        if (e instanceof ImportCancelled) {
+          cancelled = true;
+          break;
+        }
+        lines.push(`${f.label}: not imported (${e instanceof Error ? e.message : String(e)}).`);
+      } finally {
+        if (temp) await removeTemp(temp);
+      }
+    }
+  });
+  if (cancelled) lines.push("cancelled: anything listed as imported stays in the set; the rest was not downloaded.");
+
+  // 6. Report.
+  if (plan.kind === "unknown") lines.push("tempo unknown, so the stems play as recorded.");
+  else if (choice.setTempo !== null) {
+    lines.push(`tempo set to ${choice.setTempo} bpm (${tempo!.source === "session" ? "from the session" : "measured"}). the stems play as recorded.`);
+  } else if (choice.warp) lines.push(`kept this set's tempo (${song.tempo} bpm); the stems are stretched to fit.`);
+  else lines.push(`the set is already at the song's tempo (${song.tempo} bpm).`);
+  if (keyLine) lines.push(keyLine);
+  await yieldBetweenModals();
+  await showDialog(context, importReportHtml(lines, `${BASE_URL}/inspect/works/${work.id}`), IMPORT_REPORT_H);
 }

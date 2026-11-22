@@ -515,3 +515,118 @@ export function finalReportHtml(report: RegisterReport): string {
     `</div>`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Import from PICA (ADR-259)
+// ---------------------------------------------------------------------------
+
+/** Which song: one field with the catalogue's works suggested.
+ *  Bridges {value} or {cancelled:true}. */
+export function importSongHtml(labels: readonly string[]): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const nextJs = bridgeSend("JSON.stringify({value:document.getElementById('w').value.trim()})");
+  const options = labels.map((l) => `<option value="${escapeHtml(l)}"></option>`).join("");
+  return withFlatStyle(
+    `<div class="h">pica / import a song</div>` +
+    `<div class="hint">bring a song's stems from your pica catalog into this set. nothing in pica changes.</div>` +
+    `<div class="label">song</div>` +
+    `<input class="input" id="w" list="works" autocomplete="off" placeholder="start typing a song title">` +
+    `<datalist id="works">${options}</datalist>` +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(nextJs)}">next</button></div>`,
+  );
+}
+
+/** Which recording, when a song has more than one. Bridges {id} or {cancelled:true}. */
+export function importRecordingHtml(
+  songTitle: string,
+  recordings: ReadonlyArray<{ id: string; title: string; versionType: string }>,
+): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const nextJs = bridgeSend(
+    "JSON.stringify({id:(document.querySelector('input[name=r]:checked')||{}).value||''})",
+  );
+  const rows = recordings
+    .map(
+      (r, i) =>
+        `<label class="check"><input type="radio" name="r" value="${escapeHtml(r.id)}"${i === 0 ? " checked" : ""}> ` +
+        `${escapeHtml(r.title)}${r.versionType ? ` <span class="type">${escapeHtml(r.versionType)}</span>` : ""}</label>`,
+    )
+    .join("");
+  return withFlatStyle(
+    `<div class="h">pica / which recording of "${escapeHtml(songTitle)}"</div>` +
+    rows +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(nextJs)}">next</button></div>`,
+  );
+}
+
+/** Which files: every stem ticked, the master unticked, each with its length.
+ *  Bridges {ids, prefix} or {cancelled:true}. */
+export function importFilesHtml(
+  songTitle: string,
+  files: ReadonlyArray<{ id: string; label: string; length: string; master: boolean }>,
+): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const importJs = bridgeSend(
+    "JSON.stringify({ids:Array.prototype.map.call(document.querySelectorAll('input[name=f]:checked'),function(c){return c.value})," +
+      "prefix:document.getElementById('p').checked})",
+  );
+  const rows = files
+    .map(
+      (f) =>
+        `<label class="check"><input type="checkbox" name="f" value="${escapeHtml(f.id)}"${f.master ? "" : " checked"}> ` +
+        `${escapeHtml(f.label)}${f.master ? " (master)" : ""}` +
+        `${f.length ? ` <span class="type">${escapeHtml(f.length)}</span>` : ""}</label>`,
+    )
+    .join("");
+  return withFlatStyle(
+    `<div class="h">pica / import "${escapeHtml(songTitle)}"</div>` +
+    `<div class="hint">each file goes on its own new track, all starting at bar 1.</div>` +
+    rows +
+    `<div class="divider"></div>` +
+    `<label class="check"><input type="checkbox" id="p"> start each track name with the song title</label>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(importJs)}">import</button></div>`,
+  );
+}
+
+/** The tempo question, asked only when the song and the set differ.
+ *  Bridges {tempo:'song'|'session'} or {cancelled:true}. */
+export function importTempoHtml(songBpm: number, source: "session" | "measured", sessionBpm: number): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const nextJs = bridgeSend(
+    "JSON.stringify({tempo:(document.querySelector('input[name=t]:checked')||{}).value||'song'})",
+  );
+  const from = source === "session" ? "from the session it was made in" : "measured from the audio";
+  return withFlatStyle(
+    `<div class="h">pica / tempo</div>` +
+    `<div class="hint">the song is ${escapeHtml(fmtBpm(songBpm))} bpm (${from}). this set is ${escapeHtml(fmtBpm(sessionBpm))} bpm.</div>` +
+    `<label class="check"><input type="radio" name="t" value="song" checked> use the song's tempo (${escapeHtml(fmtBpm(songBpm))} bpm). the stems play exactly as recorded.</label>` +
+    `<label class="check"><input type="radio" name="t" value="session"> keep this set's tempo (${escapeHtml(fmtBpm(sessionBpm))} bpm) and stretch the stems. stretching may not sound perfect.</label>` +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(nextJs)}">import</button></div>`,
+  );
+}
+
+function fmtBpm(bpm: number): string {
+  return Number.isInteger(bpm) ? String(bpm) : bpm.toFixed(1);
+}
+
+/** The end of an import: one line per file, the tempo and key lines, and the
+ *  link back to the song in PICA. */
+export function importReportHtml(lines: readonly string[], songUrl: string): string {
+  const safeUrl = escapeHtml(songUrl);
+  return withFlatStyle(
+    `<div class="h">pica / imported</div>` +
+    lines.map((l) => `<div class="hint">${escapeHtml(l)}</div>`).join("") +
+    `<div class="label" style="margin-top:12px">credits on this song</div>` +
+    `<div class="kv"><span class="v"><a id="u" href="${safeUrl}" target="_blank">${safeUrl}</a></span>` +
+    `<button onclick="${escapeHtml(copyLinkJs("u"))}" style="margin-left:8px">copy link</button></div>` +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${CLOSE_JS}">close</button></div>`,
+  );
+}
