@@ -150,3 +150,37 @@ describe("fetchEmailContacts", () => {
     await expect(fetchEmailContacts(client)).rejects.toThrow("403");
   });
 });
+
+// Founder smoke 2026-11-23 (twice): the account owner's own one-word name,
+// "Féz", sorts last in PICA's surname order, past what one dialog loads.
+describe("fetchPeopleCandidates with the account's own name", () => {
+  it("also searches PICA for the account's own name and keeps that person", async () => {
+    const calls: any[] = [];
+    const client = {
+      callTool: async (name: string, args: any) => {
+        calls.push(args);
+        if (args.query) return { people: [{ id: "me", name: "Féz", stage_names: ["SoundsLikeFez"] }] };
+        return { people: [{ id: "a1", name: "Felicia Alamu" }] };
+      },
+    } as any;
+    const out = await fetchPeopleCandidates(client, " Féz ");
+    expect(calls[0]).toEqual({ query: "Féz", limit: 50 });
+    expect(out.map((c) => c.id)).toEqual(["me", "a1"]);
+    expect(resolvePersonId("Féz", out)).toBe("me");
+  });
+
+  it("still loads the list when the name search fails, and skips it with no name", async () => {
+    const calls: any[] = [];
+    const client = {
+      callTool: async (_n: string, args: any) => {
+        calls.push(args);
+        if (args.query) throw new Error("down");
+        return { people: [{ id: "a1", name: "Felicia Alamu" }] };
+      },
+    } as any;
+    expect((await fetchPeopleCandidates(client, "Féz")).map((c) => c.id)).toEqual(["a1"]);
+    calls.length = 0;
+    await fetchPeopleCandidates(client, null);
+    expect(calls.some((a) => a.query)).toBe(false);
+  });
+});

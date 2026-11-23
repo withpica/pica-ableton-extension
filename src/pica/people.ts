@@ -81,8 +81,25 @@ export function resolvePersonId(name: string, candidates: PersonCandidate[]): st
  * silently truncated to one page (the typeahead degrades gracefully if the cap
  * is hit).
  */
-export async function fetchPeopleCandidates(client: PicaMcpClient): Promise<PersonCandidate[]> {
+export async function fetchPeopleCandidates(
+  client: PicaMcpClient,
+  /** The connected account's own name: also searched for in PICA (see below). */
+  ownName?: string | null,
+): Promise<PersonCandidate[]> {
   const all: PersonCandidate[] = [];
+  // PICA lists people by surname with blanks last, so a one-word name (the
+  // founder's "Féz", smoke 2026-11-23, twice) sits at the very end of a big
+  // catalogue, past what one dialog loads. The account holder's own name is
+  // the one most often typed, so it is also looked up by name, which PICA
+  // matches ignoring accents (search_people_ids).
+  const own = ownName?.trim();
+  if (own) {
+    try {
+      all.push(...toPersonCandidates(await client.callTool("pica_people_query", { query: own, limit: 50 })));
+    } catch {
+      /* best-effort: the full list below still loads */
+    }
+  }
   for (let offset = 0; offset < PEOPLE_CAP; offset += PEOPLE_PAGE) {
     const raw = await client.callTool("pica_people_query", { limit: PEOPLE_PAGE, offset });
     all.push(...toPersonCandidates(raw));

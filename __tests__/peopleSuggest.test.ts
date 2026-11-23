@@ -144,3 +144,21 @@ describe("the credits dialog", () => {
     expect(creditsHtml).toContain('who.setAttribute("list", "people")');
   });
 });
+
+import { toSuggestPeople } from "../src/peopleSuggest";
+
+describe("toSuggestPeople with the account's own name", () => {
+  it("puts the account holder's own name in when no person on file has it", () => {
+    const people = toSuggestPeople([{ id: "a1", name: "Felicia Alamu", stageNames: [] }], "Féz");
+    expect(people[0]).toEqual({ name: "Féz", stageNames: [] });
+    const m = installPeopleSuggest(new JSDOM("").window.document, people).match;
+    expect(m("fe")[0]!.name).toBe("Féz");
+  });
+
+  it("adds nothing when a person already has that name, accents aside, or there is no name", () => {
+    const c = [{ id: "me", name: "Fez", stageNames: [] }];
+    expect(toSuggestPeople(c, "Féz")).toHaveLength(1);
+    expect(toSuggestPeople(c, null)).toHaveLength(1);
+    expect(toSuggestPeople(c, "  ")).toHaveLength(1);
+  });
+});

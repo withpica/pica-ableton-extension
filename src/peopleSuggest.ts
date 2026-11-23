@@ -8,8 +8,19 @@ export interface SuggestPerson {
   stageNames: string[];
 }
 
-export function toSuggestPeople(candidates: PersonCandidate[]): SuggestPerson[] {
-  return candidates.map((c) => ({ name: c.name, stageNames: c.stageNames }));
+export function toSuggestPeople(candidates: PersonCandidate[], ownName?: string | null): SuggestPerson[] {
+  const out = candidates.map((c) => ({ name: c.name, stageNames: c.stageNames }));
+  // The account holder's own name is suggested even with no person on file
+  // for it; picking it then creates the person, as typing it would.
+  const own = ownName?.trim();
+  if (own) {
+    const fold = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+    const k = fold(own);
+    if (!out.some((p) => fold(p.name) === k || p.stageNames.some((st) => fold(st) === k))) {
+      out.unshift({ name: own, stageNames: [] });
+    }
+  }
+  return out;
 }
 
 /**

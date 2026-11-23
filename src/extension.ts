@@ -321,8 +321,12 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   // the credit/writer typeaheads later (one fetch for the whole flow). Best-effort.
   // The connected account resolves alongside it (ADR-259) so naming the
   // destination costs no extra wall-clock before the panel paints.
+  // The account's own name is also searched for (fetchPeopleCandidates), so
+  // the identity resolves first; it is cached after the first run.
+  const identity = await ensureIdentity(BASE_URL, storageDir, apiKey).catch(() => null);
+  const ownName = identity?.fullName ?? null;
   const [candidates, destination] = await Promise.all([
-    fetchPeopleCandidates(new PicaMcpClient({ baseUrl: BASE_URL, apiKey })).catch(
+    fetchPeopleCandidates(new PicaMcpClient({ baseUrl: BASE_URL, apiKey }), ownName).catch(
       () => [],
     ),
     describeConnection(storageDir, apiKey),
@@ -336,7 +340,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     "</head>",
     `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson}; ` +
       `window.__PICA_DESTINATION__ = ${destinationJson};</script>` +
-      peopleSuggestScript(toSuggestPeople(candidates)) +
+      peopleSuggestScript(toSuggestPeople(candidates, ownName)) +
       `</head>`,
   );
   const url = `data:text/html,${encodeURIComponent(injected)}`;
@@ -417,7 +421,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
         return outcome?.added ?? 0;
       };
 
-      // Capture 100% org master ownership on a recording WE mint on the duplicate
+      // Write the 100% master split (no owner yet) on a recording WE mint on the duplicate
       // path (new version, or completing the existing work's master) — same as the
       // fresh-register path. Idempotent (skips if a master split exists) and a
       // starting position the owner refines/reassigns in /inspect. Best-effort: a
