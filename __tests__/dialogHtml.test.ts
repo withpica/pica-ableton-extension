@@ -600,3 +600,23 @@ describe("import dialogs", () => {
     expect(html).toContain('href="https://withpica.com/inspect/works/w1"');
   });
 });
+
+import { artistPickHtml } from "../src/dialogHtml";
+
+describe("artistPickHtml", () => {
+  it("chooses the match with the typed name, and offers a new person too", () => {
+    const html = artistPickHtml("Fez", [
+      { id: "p1", label: "Fezile Dube", same: false },
+      { id: "p2", label: "Féz · SoundsLikeFez", same: true },
+    ]);
+    expect(html).toContain('value="p2" checked');
+    expect(html).not.toContain('value="p1" checked');
+    expect(html).toContain('value=""> a new person named "Fez"');
+  });
+
+  it("chooses a new person when no match has the typed name, escaped", () => {
+    const html = artistPickHtml('<b>x</b>', [{ id: "p1", label: "Xavier", same: false }]);
+    expect(html).toContain('value="" checked> a new person named "&lt;b&gt;x&lt;/b&gt;"');
+    expect(html).not.toContain("<b>x</b>");
+  });
+});

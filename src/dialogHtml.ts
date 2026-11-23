@@ -579,6 +579,41 @@ export function songPickHtml(heading: string, query: string, labels: ReadonlyArr
   );
 }
 
+/**
+ * After the register panel: the people PICA found for the typed artist name,
+ * or a new person by that name. A match whose name is the typed one, accents
+ * and case aside, is chosen first; otherwise "a new person". Bridges {id}
+ * ("" = a new person) or {cancelled:true}.
+ */
+export function artistPickHtml(
+  typed: string,
+  matches: ReadonlyArray<{ id: string; label: string; same: boolean }>,
+): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const nextJs = bridgeSend(
+    "JSON.stringify({id:(document.querySelector('input[name=a]:checked')||{value:''}).value})",
+  );
+  const sameIdx = matches.findIndex((m) => m.same);
+  const rows =
+    matches
+      .map(
+        (m, i) =>
+          `<label class="check"><input type="radio" name="a" value="${escapeHtml(m.id)}"${i === sameIdx ? " checked" : ""}> ` +
+          `${escapeHtml(m.label)}</label>`,
+      )
+      .join("") +
+    `<label class="check"><input type="radio" name="a" value=""${sameIdx < 0 ? " checked" : ""}> ` +
+    `a new person named "${escapeHtml(typed)}"</label>`;
+  return withFlatStyle(
+    `<div class="h">pica / which artist?</div>` +
+    `<div class="hint">people in your catalogue matching "${escapeHtml(typed)}":</div>` +
+    rows +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(nextJs)}">next</button></div>`,
+  );
+}
+
 /** Which recording, when a song has more than one. Bridges {id} or {cancelled:true}. */
 export function importRecordingHtml(
   songTitle: string,

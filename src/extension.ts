@@ -66,6 +66,7 @@ import {
 import { saveWriters, type WriterOutcome } from "./pica/writers";
 import {
   fetchPeopleCandidates,
+  searchPeople,
   candidateNames,
   resolvePersonId,
   fetchEmailContacts,
@@ -80,6 +81,7 @@ import {
   finalReportHtml,
   duplicateChoiceHtml,
   titlePromptHtml,
+  artistPickHtml,
   deliverHtml,
   linkMadeBody,
   songSearchHtml,
@@ -327,7 +329,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   const ownName = identity?.fullName ?? null;
   const [candidates, destination] = await Promise.all([
     fetchPeopleCandidates(new PicaMcpClient({ baseUrl: BASE_URL, apiKey }), ownName).catch(
-      () => [],
+      (): PersonCandidate[] => [],
     ),
     describeConnection(storageDir, apiKey),
   ]);
@@ -354,7 +356,42 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   }
   if (answer.cancelled || !answer.title || !answer.artistName) return;
 
-  const primaryArtistId = resolvePersonId(answer.artistName, candidates);
+  let primaryArtistId = resolvePersonId(answer.artistName, candidates);
+  // Not one of the loaded people: ask PICA by name, so someone past what the
+  // dialog loaded (a one-word name, a band) is still found, then offer them.
+  if (!primaryArtistId) {
+    const typed = answer.artistName.trim();
+    const found = await searchPeople(new PicaMcpClient({ baseUrl: BASE_URL, apiKey }), typed).catch(
+      () => [] as PersonCandidate[],
+    );
+    if (found.length > 0) {
+      const fold = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+      const pick = safeParse(
+        await context.ui.showModalDialog(
+          `data:text/html,${encodeURIComponent(
+            artistPickHtml(
+              typed,
+              found.map((c) => ({
+                id: c.id,
+                label: c.stageNames.length ? `${c.name} · ${c.stageNames.join(", ")}` : c.name,
+                same: fold(c.name) === fold(typed) || c.stageNames.some((st) => fold(st) === fold(typed)),
+              })),
+            ),
+          )}`,
+          ARTIST_PICK_W,
+          ARTIST_PICK_H,
+        ),
+      ) as { cancelled?: boolean; id?: string };
+      if (pick.cancelled) return;
+      const chosen = found.find((c) => c.id === pick.id);
+      if (chosen) {
+        primaryArtistId = chosen.id;
+        answer.artistName = chosen.name;
+        // Later steps (credits, writers) link by these candidates too.
+        if (!candidates.some((c) => c.id === chosen.id)) candidates.push(chosen);
+      }
+    }
+  }
 
   // 3. Register (declare identity → dup-check → create), with a cancellable progress dialog.
   const client = new PicaMcpClient({ baseUrl: BASE_URL, apiKey });
@@ -563,6 +600,8 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
 
 const AUDIO_W = 520;
 const AUDIO_H = 600;
+const ARTIST_PICK_W = 460;
+const ARTIST_PICK_H = 380;
 const TITLE_W = 460;
 const TITLE_H = 250;
 const MAX_MB = Math.round(MAX_UPLOAD_BYTES / 1048576);

@@ -1,6 +1,6 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { toPersonCandidates, candidateNames, resolvePersonId, fetchPeopleCandidates } from "../src/pica/people";
 
 describe("toPersonCandidates", () => {
@@ -182,5 +182,29 @@ describe("fetchPeopleCandidates with the account's own name", () => {
     calls.length = 0;
     await fetchPeopleCandidates(client, null);
     expect(calls.some((a) => a.query)).toBe(false);
+  });
+});
+
+import { searchPeople } from "../src/pica/people";
+
+// b9 2026-11-23: any one-word name or band past the loaded list was invisible,
+// so the artist is also searched in PICA by what was typed.
+describe("searchPeople", () => {
+  it("asks PICA with what was typed and shapes the matches", async () => {
+    const calls: any[] = [];
+    const client = {
+      callTool: async (name: string, args: any) => {
+        calls.push([name, args]);
+        return { people: [{ id: "b1", name: "Lagbaja", stage_names: [] }] };
+      },
+    } as any;
+    expect((await searchPeople(client, "  lagba ")).map((c) => c.id)).toEqual(["b1"]);
+    expect(calls).toEqual([["pica_people_query", { query: "lagba", limit: 10 }]]);
+  });
+
+  it("asks nothing for an empty name", async () => {
+    const client = { callTool: vi.fn() } as any;
+    expect(await searchPeople(client, " ")).toEqual([]);
+    expect(client.callTool).not.toHaveBeenCalled();
   });
 });

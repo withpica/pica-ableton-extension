@@ -45,6 +45,20 @@ export function toPersonCandidates(raw: unknown): PersonCandidate[] {
   return out;
 }
 
+/**
+ * People in the caller's catalogue matching what was typed, searched by PICA
+ * (pica_people_query `query`: any part of a name, stage name or email, accents
+ * ignored, server-side search_people_ids). The suggestion list is drawn from
+ * what one dialog loads, and PICA lists people by surname with blanks last, so
+ * a one-word name or a band can sit past it (founder smoke 2026-11-23); this
+ * finds them anyway. Best-effort for callers: they catch.
+ */
+export async function searchPeople(client: PicaMcpClient, text: string): Promise<PersonCandidate[]> {
+  const query = text.trim();
+  if (!query) return [];
+  return toPersonCandidates(await client.callTool("pica_people_query", { query, limit: 10 }));
+}
+
 /** Flat, de-duplicated list of every name + stage name, for the dialog datalist. */
 export function candidateNames(candidates: PersonCandidate[]): string[] {
   const out: string[] = [];
