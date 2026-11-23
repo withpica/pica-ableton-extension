@@ -124,7 +124,7 @@ Set as a new version** (a new recording under the same work) — pick the versio
 type (alternate, remix, acoustic, live, cover, alternate master, demo). Any
 recording the extension *mints* (a fresh master, or a new version) gets a 100%
 master share. Who owns the master isn't set yet: choose the owner on the
-recording page. Adding credits to a pre-existing
+recording page in PICA. Adding credits to a pre-existing
 recording writes no share.
 
 **Credits checklist.** After register (or when re-running on an already-registered

@@ -433,8 +433,8 @@ function ownershipLine(status?: MasterOwnershipOutcome["status"]): string | null
       // The share register writes has no owner (recording_splits holds only
       // a person), so the recording page shows "unknown" (68, 2026-11-23).
       // Since pica#4041 (V8) the owner is picked on that share in one step.
-      // Words by e1, matching the MCP reply (mcp-server/src/tools/register.ts).
-      return "master ownership: who owns the master isn't set yet: choose the owner on the recording page.";
+      // Words by e1.
+      return "master ownership: not set yet. choose the owner on the recording page in pica.";
     case "skipped_existing":
       return "master ownership: already set.";
     case "failed":

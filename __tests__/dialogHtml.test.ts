@@ -90,7 +90,9 @@ describe("finalReportHtml", () => {
     // pica#4041 (V8): the owner is picked on the recording page in one step,
     // so the line says that and never mentions ending the share (e1).
     const created = finalReportHtml({ ...base, masterOwnership: "created" });
-    expect(created).toContain("who owns the master isn't set yet: choose the owner on the recording page.");
+    expect(created).toContain(
+      '<span class="k">master ownership</span><span class="v">not set yet. choose the owner on the recording page in pica.</span>',
+    );
     expect(created).not.toContain("owns 100%");
     expect(created).not.toContain("end the share");
     expect(finalReportHtml({ ...base, masterOwnership: "skipped_existing" })).toContain("already set.");
