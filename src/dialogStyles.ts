@@ -11,6 +11,8 @@ export const FLAT_STYLE =
   ":root{--surface:#0A0A0A;--ink:#EDEDED;--muted:rgba(255,255,255,.45);" +
   "--faint:rgba(255,255,255,.25);--gridline:rgba(255,255,255,.10);--copper:#B87333}" +
   "*{box-sizing:border-box}" +
+  // Native controls draw dark too (WebKit honours color-scheme).
+  ":root{color-scheme:dark}" +
   "body{margin:0;background:var(--surface);color:var(--ink);" +
   "font:13px ui-monospace,Menlo,Monaco,monospace;padding:16px 18px;-webkit-user-select:text;user-select:text}" +
   ".h{color:var(--copper);font-size:13px;letter-spacing:.02em;padding-bottom:10px;" +
@@ -21,6 +23,13 @@ export const FLAT_STYLE =
   "color:var(--ink);padding:8px 9px;font:inherit;outline:none}" +
   ".input:focus,.textarea:focus,.select:focus,.instrument:focus,.who:focus{border-color:var(--copper)}" +
   ".textarea{resize:none}" +
+  // Plain inputs and selects the ui/*.html pages build without a class
+  // ("who wrote this?", "log these stems") rendered white (founder smoke
+  // 2026-11-23): the same flat look as .input, checkboxes and radios aside.
+  "input:not([type=checkbox]):not([type=radio]):not([class]),select:not([class]){background:var(--surface);" +
+  "border:1px solid var(--gridline);color:var(--ink);padding:6px 8px;font:inherit;outline:none}" +
+  "input:not([type=checkbox]):not([type=radio]):not([class]):focus,select:not([class]):focus{border-color:var(--copper)}" +
+  ".writer-row input:not([class]),.stem-row input:not([class]){flex:1}" +
   ".check{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:var(--muted)}" +
   ".check input{accent-color:var(--copper)}" +
   ".divider{border-top:1px solid var(--gridline);margin:14px 0}" +
