@@ -143,12 +143,14 @@ re-running never duplicates.
 to PICA** on an already-registered Set), pick which arrangement audio tracks to
 upload — each is rendered and filed as a `stem` under the recording, auto-linked.
 Rendering is **pre-FX**, so freeze & flatten a track first to capture it as you
-hear it. For the **master**, use the "upload your master" link to the recording's
-page and drop your exported mixdown there (browser upload, attaches automatically).
+hear it. For the **master**, use the "upload your master" link: it opens the song
+in PICA, whose audio step uploads your exported mixdown as the recording's master.
 Each stem is best-effort and reported individually; files over 800MB are skipped.
 
 **Share with….** Right-click a track → **Share with… (PICA)** (or "share with" on
-the final report) to send a registered work to someone:
+the final report) to send a registered work to someone. From the right-click,
+type part of the song's title (or the artist): PICA searches your catalog, and
+you pick the song from what it finds.
 
 - **By email.** Type an address, or start typing a name and pick someone in your
   catalog who already has an email on file. A new address still works; it is
@@ -158,7 +160,8 @@ the final report) to send a registered work to someone:
 - **Allow download** (on by default). Off, the recipient can listen but not
   download.
 - **Or just make a link.** Creates the same link without emailing anyone, with a
-  copy button, for you to send however you like.
+  copy button, for you to send however you like. A message you typed shows on
+  the link's page.
 
 The recipient gets a PICA page with a player that plays the shared stems in
 sync (mute, solo and volume per stem). Every share is a link: PICA counts its
@@ -168,8 +171,9 @@ email someone who isn't in your catalog or on PICA, PICA asks you to confirm
 the address.
 
 **Import from PICA.** Right-click a track → **Import from PICA…** to bring a
-song's audio from your catalog into the open Set. Pick the song (and the
-recording, if it has more than one), tick the files you want (every stem is
+song's audio from your catalog into the open Set. Type part of the song's title
+(or the artist), pick the song from what PICA finds (and the recording, if it
+has more than one), tick the files you want (every stem is
 ticked; the master is offered but not ticked), and each one lands on its own new
 track, all starting at bar 1 so they stay in sync. Nothing in PICA changes.
 
@@ -187,8 +191,8 @@ track, all starting at bar 1 so they stay in sync. Nothing in PICA changes.
 **The master isn't rendered here.** The Extensions SDK can only render an audio
 track **before its effects** (`renderPreFxAudio`), and has no way to render the
 master bus or a full mixdown. So stems come from the extension; the master is
-a manual **File → Export Audio/Video** in Live, then an upload on the
-recording's page in PICA (the "upload your master" link). A share includes
+a manual **File → Export Audio/Video** in Live, then an upload from the song's
+audio step in PICA (the "upload your master" link). A share includes
 whatever audio is on the work at the time.
 
 ## How it works
