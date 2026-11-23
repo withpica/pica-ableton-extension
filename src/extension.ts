@@ -67,6 +67,7 @@ import { saveWriters, type WriterOutcome } from "./pica/writers";
 import {
   fetchPeopleCandidates,
   searchPeople,
+  hasExactMatch,
   candidateNames,
   resolvePersonId,
   fetchEmailContacts,
@@ -81,7 +82,7 @@ import {
   finalReportHtml,
   duplicateChoiceHtml,
   titlePromptHtml,
-  artistPickHtml,
+  personPickHtml,
   deliverHtml,
   linkMadeBody,
   songSearchHtml,
@@ -359,37 +360,15 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   let primaryArtistId = resolvePersonId(answer.artistName, candidates);
   // Not one of the loaded people: ask PICA by name, so someone past what the
   // dialog loaded (a one-word name, a band) is still found, then offer them.
-  if (!primaryArtistId) {
+  {
     const typed = answer.artistName.trim();
-    const found = await searchPeople(new PicaMcpClient({ baseUrl: BASE_URL, apiKey }), typed).catch(
-      () => [] as PersonCandidate[],
-    );
-    if (found.length > 0) {
-      const fold = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-      const pick = safeParse(
-        await context.ui.showModalDialog(
-          `data:text/html,${encodeURIComponent(
-            artistPickHtml(
-              typed,
-              found.map((c) => ({
-                id: c.id,
-                label: c.stageNames.length ? `${c.name} · ${c.stageNames.join(", ")}` : c.name,
-                same: fold(c.name) === fold(typed) || c.stageNames.some((st) => fold(st) === fold(typed)),
-              })),
-            ),
-          )}`,
-          ARTIST_PICK_W,
-          ARTIST_PICK_H,
-        ),
-      ) as { cancelled?: boolean; id?: string };
-      if (pick.cancelled) return;
-      const chosen = found.find((c) => c.id === pick.id);
-      if (chosen) {
-        primaryArtistId = chosen.id;
-        answer.artistName = chosen.name;
-        // Later steps (credits, writers) link by these candidates too.
-        if (!candidates.some((c) => c.id === chosen.id)) candidates.push(chosen);
-      }
+    const runOnce: ClientRunner = (fn) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey }));
+    const picked = await pickPeople(context, runOnce, [typed], candidates, "artist");
+    if (!picked) return;
+    const chosen = picked.get(typed);
+    if (chosen) {
+      primaryArtistId = chosen.id;
+      answer.artistName = chosen.name;
     }
   }
 
@@ -600,8 +579,8 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
 
 const AUDIO_W = 520;
 const AUDIO_H = 600;
-const ARTIST_PICK_W = 460;
-const ARTIST_PICK_H = 380;
+const PERSON_PICK_W = 460;
+const PERSON_PICK_H = 380;
 const TITLE_W = 460;
 const TITLE_H = 250;
 const MAX_MB = Math.round(MAX_UPLOAD_BYTES / 1048576);
@@ -1055,6 +1034,62 @@ const STEM_PICKER_H = 320;
 /** A reconnect-aware runner: builds a client (possibly from a fresh key) and runs `fn`. */
 type ClientRunner = <T>(fn: (c: PicaMcpClient) => Promise<T>) => Promise<T>;
 
+/**
+ * For each typed name that matches no loaded person, search PICA by that name
+ * (accents ignored, any part of a name) and, when it finds people, ask which
+ * one is meant, or a new person. One dialog per such name. Returns the picks
+ * keyed by the trimmed typed name, or null when one is cancelled (the caller
+ * writes nothing). Picked people join `candidates` for the steps after.
+ * A failed search leaves the name as typed, as before.
+ */
+async function pickPeople(
+  context: ExtensionContext<"1.0.0">,
+  run: ClientRunner,
+  names: readonly string[],
+  candidates: PersonCandidate[],
+  role: "artist" | "performer" | "writer",
+): Promise<Map<string, PersonCandidate> | null> {
+  const picked = new Map<string, PersonCandidate>();
+  const fold = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const typed = raw.trim();
+    if (!typed || seen.has(fold(typed)) || hasExactMatch(typed, candidates)) continue;
+    seen.add(fold(typed));
+    const found = await run((c) => searchPeople(c, typed)).catch(() => [] as PersonCandidate[]);
+    if (found.length === 0) continue;
+    const pick = safeParse(
+      await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(
+          personPickHtml(
+            role,
+            typed,
+            found.map((c) => ({
+              id: c.id,
+              label: c.stageNames.length ? `${c.name} · ${c.stageNames.join(", ")}` : c.name,
+              same: fold(c.name) === fold(typed) || c.stageNames.some((st) => fold(st) === fold(typed)),
+            })),
+          ),
+        )}`,
+        PERSON_PICK_W,
+        PERSON_PICK_H,
+      ),
+    ) as { cancelled?: boolean; id?: string };
+    if (pick.cancelled) return null;
+    const chosen = found.find((c) => c.id === pick.id);
+    if (!chosen) continue; // a new person: the name goes in as typed
+    picked.set(typed, chosen);
+    if (!candidates.some((c) => c.id === chosen.id)) candidates.push(chosen);
+  }
+  // Same name typed in other rows: the same pick.
+  for (const raw of names) {
+    const typed = raw.trim();
+    if (picked.has(typed)) continue;
+    for (const [k, v] of picked) if (fold(k) === fold(typed)) picked.set(typed, v);
+  }
+  return picked;
+}
+
 /** The Stage-2 checklist: parts → panel → per-row credit writes → outcome report. */
 async function runCreditsFlow(
   context: ExtensionContext<"1.0.0">,
@@ -1086,11 +1121,15 @@ async function runCreditsFlow(
   }
   if (answer.cancelled || !Array.isArray(answer.tree)) return { state: "skipped" }; // skip writes nothing
 
+  const rows = serializeFrontier(answer.tree);
+  const picked = await pickPeople(context, run, rows.map((r) => r.performerName), candidates, "performer");
+  if (!picked) return { state: "skipped" }; // cancelled at a pick: nothing written
+
   try {
     const outcomes = (await context.ui.withinProgressDialog(
       creditsPhaseLabel(),
       { progress: 30 },
-      async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing, candidates)),
+      async () => run((c) => saveCredits(c, recordingId, rows, existing, candidates, picked)),
     )) as CreditOutcome[];
     return { state: "saved", outcomes };
   } catch (e) {
@@ -1126,11 +1165,17 @@ async function runWritersFlow(
   }
   if (answer.cancelled || !Array.isArray(answer.names)) return { state: "skipped" }; // skip writes nothing
 
+  const picked = await pickPeople(context, run, answer.names, candidates, "writer");
+  if (!picked) return { state: "skipped" }; // cancelled at a pick: nothing written
+  // pica_work_writers_add takes names and links an exact match, so a picked
+  // person goes in under their own name.
+  const names = answer.names.map((n) => picked.get(n.trim())?.name ?? n);
+
   try {
     const outcomes = (await context.ui.withinProgressDialog(
       writersPhaseLabel(),
       { progress: 30 },
-      async () => run((c) => saveWriters(c, workId, answer.names!)),
+      async () => run((c) => saveWriters(c, workId, names)),
     )) as WriterOutcome[];
     return { state: "saved", outcomes };
   } catch (e) {

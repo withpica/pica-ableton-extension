@@ -110,7 +110,7 @@ Install the packaged extension by dropping `dist/pica.ablx` onto Live's **Extens
 
 Right-click a track → **Register Set in PICA**. The confirm panel is editable; a duplicate title offers a choice instead of creating a second work.
 
-**Pick existing people.** The artist field (confirm panel) and the credit/writer name fields show a typeahead of the people already in your catalog — start typing and pick one to link the existing person instead of creating a near-duplicate. Picking is never forced: a genuinely new name still creates a person. If the artist you typed wasn't one of the suggestions, PICA is searched for it when you confirm, and you choose between the people it finds and a new person. (If the catalog can't be reached the fields just fall back to plain text.)
+**Pick existing people.** The artist field (confirm panel) and the credit/writer name fields show a typeahead of the people already in your catalog — start typing and pick one to link the existing person instead of creating a near-duplicate. Picking is never forced: a genuinely new name still creates a person. If a name you typed (the artist, a performer or a writer) wasn't one of the suggestions, PICA is searched for it when you confirm, and you choose between the people it finds and a new person. (If the catalog can't be reached the fields just fall back to plain text.)
 
 The flow runs the capture steps quietly and ends in **one consolidated final
 report** — what was captured (master ownership, credits, writers, Splice

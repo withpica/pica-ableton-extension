@@ -601,21 +601,23 @@ describe("import dialogs", () => {
   });
 });
 
-import { artistPickHtml } from "../src/dialogHtml";
+import { personPickHtml } from "../src/dialogHtml";
 
-describe("artistPickHtml", () => {
+describe("personPickHtml", () => {
   it("chooses the match with the typed name, and offers a new person too", () => {
-    const html = artistPickHtml("Fez", [
+    const html = personPickHtml("artist", "Fez", [
       { id: "p1", label: "Fezile Dube", same: false },
       { id: "p2", label: "Féz · SoundsLikeFez", same: true },
     ]);
+    expect(html).toContain("pica / which artist?");
     expect(html).toContain('value="p2" checked');
     expect(html).not.toContain('value="p1" checked');
     expect(html).toContain('value=""> a new person named "Fez"');
   });
 
   it("chooses a new person when no match has the typed name, escaped", () => {
-    const html = artistPickHtml('<b>x</b>', [{ id: "p1", label: "Xavier", same: false }]);
+    const html = personPickHtml("writer", '<b>x</b>', [{ id: "p1", label: "Xavier", same: false }]);
+    expect(html).toContain("pica / which writer?");
     expect(html).toContain('value="" checked> a new person named "&lt;b&gt;x&lt;/b&gt;"');
     expect(html).not.toContain("<b>x</b>");
   });

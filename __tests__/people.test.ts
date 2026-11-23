@@ -208,3 +208,15 @@ describe("searchPeople", () => {
     expect(client.callTool).not.toHaveBeenCalled();
   });
 });
+
+import { hasExactMatch } from "../src/pica/people";
+
+describe("hasExactMatch", () => {
+  it("is true for a name or stage name, case and spaces aside, and false otherwise", () => {
+    const c = [{ id: "a", name: "Jo Bloggs", stageNames: ["JB"] }];
+    expect(hasExactMatch(" jo bloggs ", c)).toBe(true);
+    expect(hasExactMatch("jb", c)).toBe(true);
+    expect(hasExactMatch("Jo", c)).toBe(false);
+    expect(hasExactMatch("", c)).toBe(false);
+  });
+});
