@@ -81,8 +81,7 @@ import {
   duplicateChoiceHtml,
   titlePromptHtml,
   deliverHtml,
-  LINK_MADE_BODY,
-  LINK_NOTE_NOT_ADDED,
+  linkMadeBody,
   songSearchHtml,
   songPickHtml,
   importRecordingHtml,
@@ -894,8 +893,7 @@ async function runDeliver(
         ),
     )) as Awaited<ReturnType<typeof createWorkLink>>;
     if (made.state === "made") {
-      const body = made.noteSaved === false ? `${LINK_MADE_BODY} ${LINK_NOTE_NOT_ADDED}` : LINK_MADE_BODY;
-      await showLink(context, "pica — link made", body, made.shareUrl);
+      await showLink(context, "pica — link made", linkMadeBody(made.noteSaved), made.shareUrl);
     } else {
       if (made.detail) console.error("[pica] link not made:", made.code ?? "", made.detail);
       await showError(context, `couldn't make the link: ${made.message}`);

@@ -11,6 +11,7 @@ import {
   deliverHtml,
   deliverConfirmHtml,
   LINK_MADE_BODY,
+  linkMadeBody,
   stemsReportHtml,
   shareStemsHtml,
   destinationRow,
@@ -515,6 +516,16 @@ describe("deliverHtml: known contacts and a plain link", () => {
     expect(LINK_MADE_BODY).toContain("no one was emailed");
     expect(LINK_MADE_BODY).toContain("turn off");
     expect(LINK_MADE_BODY).toContain("under sharing");
+  });
+
+  // e1 2026-11-23: pica's sharing section can't add a note to a link, so the
+  // line says to send the note with the link, not to add it there.
+  it("says when a typed note wasn't added, and only then", () => {
+    expect(linkMadeBody(false)).toContain("wasn't added");
+    expect(linkMadeBody(false)).toContain("send the note to them yourself");
+    expect(linkMadeBody(false)).not.toContain("add it on the song");
+    expect(linkMadeBody(true)).toBe(LINK_MADE_BODY);
+    expect(linkMadeBody(undefined)).toBe(LINK_MADE_BODY);
   });
 });
 
