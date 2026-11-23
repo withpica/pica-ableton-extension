@@ -1,6 +1,6 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
-import { initialize, type ActivationContext, type ExtensionContext } from "@ableton-extensions/sdk";
+import { initialize, WarpMode, type ActivationContext, type ExtensionContext } from "@ableton-extensions/sdk";
 import interfaceHtml from "../ui/interface.html";
 import creditsHtml from "../ui/credits.html";
 import writersHtml from "../ui/writers.html";
@@ -14,6 +14,31 @@ const audioHtmlFlat = injectFlatStyle(audioHtml);
 import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { PicaMcpClient } from "./pica/mcpClient";
+import {
+  readOnly,
+  searchWorks,
+  workLabel,
+  type WorkChoice,
+  toRecordingChoices,
+  toImportFiles,
+  filesForRecording,
+  formatLength,
+  songTempo,
+  songKey,
+  tempoPlan,
+  tempoChoice,
+  keyNote,
+  tempFileName,
+  downloadToFile,
+  removeTemp,
+  trackName,
+  ImportCancelled,
+  fileFailureReason,
+  importErrorMessage,
+  type ImportStep,
+  type ImportFile,
+  type ReadOnlyClient,
+} from "./pica/importFromPica";
 import { readApiKey, readCredentials, keyPrefix } from "./pica/keyStore";
 import { ensureIdentity, destinationLine } from "./pica/identity";
 import { readSong, type SongLike } from "./session/read";
@@ -41,6 +66,8 @@ import {
 import { saveWriters, type WriterOutcome } from "./pica/writers";
 import {
   fetchPeopleCandidates,
+  searchPeople,
+  hasExactMatch,
   candidateNames,
   resolvePersonId,
   fetchEmailContacts,
@@ -55,8 +82,15 @@ import {
   finalReportHtml,
   duplicateChoiceHtml,
   titlePromptHtml,
+  personPickHtml,
   deliverHtml,
-  LINK_MADE_BODY,
+  linkMadeBody,
+  songSearchHtml,
+  songPickHtml,
+  importRecordingHtml,
+  importFilesHtml,
+  importTempoHtml,
+  importReportHtml,
   deliverConfirmHtml,
   stemsReportHtml,
   shareStemsHtml,
@@ -132,6 +166,18 @@ export function activate(activation: ActivationContext): void {
   });
   void context.ui.registerContextMenuAction("AudioTrack", "Share with… (PICA)", DELIVER_ID);
   void context.ui.registerContextMenuAction("MidiTrack", "Share with… (PICA)", DELIVER_ID);
+
+  // Import from PICA: bring a song's stems from the catalogue into this Set.
+  // Read-only on PICA (src/pica/importFromPica.ts READ_ONLY_TOOLS).
+  const IMPORT_ID = "pica.import";
+  context.commands.registerCommand(IMPORT_ID, () => {
+    void runImport(context).catch((e) => {
+      console.error("[pica import]", e);
+      void showError(context, importErrorMessage(e instanceof Error ? e.message : String(e)));
+    });
+  });
+  void context.ui.registerContextMenuAction("AudioTrack", "Import from PICA…", IMPORT_ID);
+  void context.ui.registerContextMenuAction("MidiTrack", "Import from PICA…", IMPORT_ID);
 
   // ADR-259: the deliberate route to "who am I connected as", and the only way
   // to change account or sign out without editing the filesystem. Until this
@@ -278,9 +324,13 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   // the credit/writer typeaheads later (one fetch for the whole flow). Best-effort.
   // The connected account resolves alongside it (ADR-259) so naming the
   // destination costs no extra wall-clock before the panel paints.
+  // The account's own name is also searched for (fetchPeopleCandidates), so
+  // the identity resolves first; it is cached after the first run.
+  const identity = await ensureIdentity(BASE_URL, storageDir, apiKey).catch(() => null);
+  const ownName = identity?.fullName ?? null;
   const [candidates, destination] = await Promise.all([
-    fetchPeopleCandidates(new PicaMcpClient({ baseUrl: BASE_URL, apiKey })).catch(
-      () => [],
+    fetchPeopleCandidates(new PicaMcpClient({ baseUrl: BASE_URL, apiKey }), ownName).catch(
+      (): PersonCandidate[] => [],
     ),
     describeConnection(storageDir, apiKey),
   ]);
@@ -293,7 +343,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     "</head>",
     `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson}; ` +
       `window.__PICA_DESTINATION__ = ${destinationJson};</script>` +
-      peopleSuggestScript(toSuggestPeople(candidates)) +
+      peopleSuggestScript(toSuggestPeople(candidates, ownName)) +
       `</head>`,
   );
   const url = `data:text/html,${encodeURIComponent(injected)}`;
@@ -307,7 +357,20 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   }
   if (answer.cancelled || !answer.title || !answer.artistName) return;
 
-  const primaryArtistId = resolvePersonId(answer.artistName, candidates);
+  let primaryArtistId = resolvePersonId(answer.artistName, candidates);
+  // Not one of the loaded people: ask PICA by name, so someone past what the
+  // dialog loaded (a one-word name, a band) is still found, then offer them.
+  {
+    const typed = answer.artistName.trim();
+    const runOnce: ClientRunner = (fn) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey }));
+    const picked = await pickPeople(context, runOnce, [typed], candidates, "artist");
+    if (!picked) return;
+    const chosen = picked.get(typed);
+    if (chosen) {
+      primaryArtistId = chosen.id;
+      answer.artistName = chosen.name;
+    }
+  }
 
   // 3. Register (declare identity → dup-check → create), with a cancellable progress dialog.
   const client = new PicaMcpClient({ baseUrl: BASE_URL, apiKey });
@@ -374,7 +437,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
         return outcome?.added ?? 0;
       };
 
-      // Capture 100% org master ownership on a recording WE mint on the duplicate
+      // Write the 100% master split (no owner yet) on a recording WE mint on the duplicate
       // path (new version, or completing the existing work's master) — same as the
       // fresh-register path. Idempotent (skips if a master split exists) and a
       // starting position the owner refines/reassigns in /inspect. Best-effort: a
@@ -516,6 +579,8 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
 
 const AUDIO_W = 520;
 const AUDIO_H = 600;
+const PERSON_PICK_W = 460;
+const PERSON_PICK_H = 380;
 const TITLE_W = 460;
 const TITLE_H = 250;
 const MAX_MB = Math.round(MAX_UPLOAD_BYTES / 1048576);
@@ -553,7 +618,8 @@ async function runSendStems(
     return;
   }
   const targets = deriveRenderTargets(audioTracks);
-  const masterUrl = `${BASE_URL}/inspect/recordings/${recordingId}`;
+  // The song page's audio step uploads the master (see finalReportHtml).
+  const masterUrl = `${BASE_URL}/inspect/works/${workId}`;
 
   const locators = locatorOptions(
     ((song as unknown as { cuePoints?: CueLike[] }).cuePoints ?? []) as CueLike[],
@@ -849,8 +915,9 @@ async function runDeliver(
         ),
     )) as Awaited<ReturnType<typeof createWorkLink>>;
     if (made.state === "made") {
-      await showLink(context, "pica — link made", LINK_MADE_BODY, made.shareUrl);
+      await showLink(context, "pica — link made", linkMadeBody(made.noteSaved), made.shareUrl);
     } else {
+      if (made.detail) console.error("[pica] link not made:", made.code ?? "", made.detail);
       await showError(context, `couldn't make the link: ${made.message}`);
     }
     return;
@@ -898,7 +965,7 @@ async function runDeliver(
     await showLink(
       context,
       "pica — shared",
-      `emailed ${result.displayName ?? email} (${result.classification}).`,
+      `emailed ${result.displayName ?? email}.`,
       result.shareUrl || `${BASE_URL}/inspect/works/${workId}`,
     );
   } else if (result.state === "error") {
@@ -931,28 +998,25 @@ async function runDeliverStandalone(context: ExtensionContext<"1.0.0">, hostApiV
     );
   const liveVersion = hostApiVersion ? `(api ${hostApiVersion})` : "";
 
-  const titleRaw = await context.ui.showModalDialog(
-    `data:text/html,${encodeURIComponent(titlePromptHtml("type the title of the work you want to share:"))}`,
-    TITLE_W,
-    TITLE_H,
+  // Which work: searched in PICA by what was typed, as import does. It was
+  // an exact-title lookup, so "Jed" or "Ableton" found nothing (founder
+  // smoke 2026-11-23).
+  const work = await pickSong(
+    context,
+    (text) =>
+      runWithClient(async (c) => {
+        await ensureIntroduced(c, liveVersion);
+        return searchWorks(readOnly(c), text);
+      }),
+    "pica / share a song",
+    "type part of the song's title, or the artist.",
   );
-  const parsed = safeParse(titleRaw) as { title?: string; cancelled?: boolean };
-  const title = parsed.title?.trim();
-  if (parsed.cancelled || !title) return;
-
-  const found = await runWithClient(async (c) => {
-    await ensureIntroduced(c, liveVersion);
-    return findExistingRegistration(c, title);
-  });
-  if (!found?.workId) {
-    await showError(context, `no registered work titled "${title}" found. register it in PICA first, then deliver.`);
-    return;
-  }
+  if (!work) return;
   await runDeliver(
     context,
     runWithClient,
-    found.workId,
-    title,
+    work.id,
+    work.title,
     await describeConnection(storageDir, currentKey),
   );
 }
@@ -969,6 +1033,62 @@ const STEM_PICKER_H = 320;
 
 /** A reconnect-aware runner: builds a client (possibly from a fresh key) and runs `fn`. */
 type ClientRunner = <T>(fn: (c: PicaMcpClient) => Promise<T>) => Promise<T>;
+
+/**
+ * For each typed name that matches no loaded person, search PICA by that name
+ * (accents ignored, any part of a name) and, when it finds people, ask which
+ * one is meant, or a new person. One dialog per such name. Returns the picks
+ * keyed by the trimmed typed name, or null when one is cancelled (the caller
+ * writes nothing). Picked people join `candidates` for the steps after.
+ * A failed search leaves the name as typed, as before.
+ */
+async function pickPeople(
+  context: ExtensionContext<"1.0.0">,
+  run: ClientRunner,
+  names: readonly string[],
+  candidates: PersonCandidate[],
+  role: "artist" | "performer" | "writer",
+): Promise<Map<string, PersonCandidate> | null> {
+  const picked = new Map<string, PersonCandidate>();
+  const fold = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const typed = raw.trim();
+    if (!typed || seen.has(fold(typed)) || hasExactMatch(typed, candidates)) continue;
+    seen.add(fold(typed));
+    const found = await run((c) => searchPeople(c, typed)).catch(() => [] as PersonCandidate[]);
+    if (found.length === 0) continue;
+    const pick = safeParse(
+      await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(
+          personPickHtml(
+            role,
+            typed,
+            found.map((c) => ({
+              id: c.id,
+              label: c.stageNames.length ? `${c.name} · ${c.stageNames.join(", ")}` : c.name,
+              same: fold(c.name) === fold(typed) || c.stageNames.some((st) => fold(st) === fold(typed)),
+            })),
+          ),
+        )}`,
+        PERSON_PICK_W,
+        PERSON_PICK_H,
+      ),
+    ) as { cancelled?: boolean; id?: string };
+    if (pick.cancelled) return null;
+    const chosen = found.find((c) => c.id === pick.id);
+    if (!chosen) continue; // a new person: the name goes in as typed
+    picked.set(typed, chosen);
+    if (!candidates.some((c) => c.id === chosen.id)) candidates.push(chosen);
+  }
+  // Same name typed in other rows: the same pick.
+  for (const raw of names) {
+    const typed = raw.trim();
+    if (picked.has(typed)) continue;
+    for (const [k, v] of picked) if (fold(k) === fold(typed)) picked.set(typed, v);
+  }
+  return picked;
+}
 
 /** The Stage-2 checklist: parts → panel → per-row credit writes → outcome report. */
 async function runCreditsFlow(
@@ -1001,11 +1121,15 @@ async function runCreditsFlow(
   }
   if (answer.cancelled || !Array.isArray(answer.tree)) return { state: "skipped" }; // skip writes nothing
 
+  const rows = serializeFrontier(answer.tree);
+  const picked = await pickPeople(context, run, rows.map((r) => r.performerName), candidates, "performer");
+  if (!picked) return { state: "skipped" }; // cancelled at a pick: nothing written
+
   try {
     const outcomes = (await context.ui.withinProgressDialog(
       creditsPhaseLabel(),
       { progress: 30 },
-      async () => run((c) => saveCredits(c, recordingId, serializeFrontier(answer.tree!), existing, candidates)),
+      async () => run((c) => saveCredits(c, recordingId, rows, existing, candidates, picked)),
     )) as CreditOutcome[];
     return { state: "saved", outcomes };
   } catch (e) {
@@ -1041,11 +1165,17 @@ async function runWritersFlow(
   }
   if (answer.cancelled || !Array.isArray(answer.names)) return { state: "skipped" }; // skip writes nothing
 
+  const picked = await pickPeople(context, run, answer.names, candidates, "writer");
+  if (!picked) return { state: "skipped" }; // cancelled at a pick: nothing written
+  // pica_work_writers_add takes names and links an exact match, so a picked
+  // person goes in under their own name.
+  const names = answer.names.map((n) => picked.get(n.trim())?.name ?? n);
+
   try {
     const outcomes = (await context.ui.withinProgressDialog(
       writersPhaseLabel(),
       { progress: 30 },
-      async () => run((c) => saveWriters(c, workId, answer.names!)),
+      async () => run((c) => saveWriters(c, workId, names)),
     )) as WriterOutcome[];
     return { state: "saved", outcomes };
   } catch (e) {
@@ -1098,4 +1228,245 @@ async function runReportFollowOn(
   } else {
     await runDeliver(context, run, workId, workTitle, destination);
   }
+}
+
+const IMPORT_W = 480;
+const SONG_SEARCH_H = 300;
+const SONG_PICK_H = 460;
+const IMPORT_FILES_H = 520;
+const IMPORT_TEMPO_H = 360;
+const IMPORT_REPORT_H = 460;
+
+/**
+ * Ask for part of a song's title, search the catalogue in PICA, and pick one
+ * of the matches (straight through when there is exactly one). Nothing is
+ * suggested before anything is typed. Shared by import and share.
+ */
+async function pickSong(
+  context: ExtensionContext<"1.0.0">,
+  search: (text: string) => Promise<WorkChoice[]>,
+  heading: string,
+  hint: string,
+): Promise<WorkChoice | undefined> {
+  let notice = "";
+  let typed = "";
+  for (;;) {
+    const ask = safeParse(
+      await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(songSearchHtml(heading, hint, notice, typed))}`,
+        IMPORT_W,
+        SONG_SEARCH_H,
+      ),
+    ) as { cancelled?: boolean; value?: string };
+    typed = ask.value?.trim() ?? "";
+    if (ask.cancelled || !typed) return undefined;
+    const found = await search(typed);
+    if (found.length === 0) {
+      notice = `nothing in your catalogue matches "${typed}". try fewer letters, or the artist.`;
+      continue;
+    }
+    if (found.length === 1) return found[0];
+    const pick = safeParse(
+      await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(
+          songPickHtml(heading, typed, found.map((w) => ({ id: w.id, label: workLabel(w) }))),
+        )}`,
+        IMPORT_W,
+        SONG_PICK_H,
+      ),
+    ) as { cancelled?: boolean; again?: boolean; id?: string };
+    if (pick.cancelled) return undefined;
+    if (pick.again) {
+      notice = "";
+      continue;
+    }
+    return found.find((w) => w.id === pick.id);
+  }
+}
+
+/**
+ * Import from PICA: which song → which recording (only when there is more
+ * than one) → which files → tempo (only when it matters) → download, import,
+ * one new track per file at bar 1 → report. Writes nothing to PICA.
+ */
+async function runImport(context: ExtensionContext<"1.0.0">): Promise<void> {
+  const storageDir = context.environment.storageDirectory;
+  const tempDir = context.environment.tempDirectory;
+  if (!storageDir || !tempDir) {
+    await showError(context, "no storage or temp folder is available, so nothing can be imported.");
+    return;
+  }
+  let apiKey = await readApiKey(storageDir);
+  if (!apiKey) {
+    apiKey = await connectAndStoreKey(context, storageDir);
+    if (!apiKey) return;
+  }
+  let currentKey = apiKey!;
+  const read = <T>(fn: (c: ReadOnlyClient) => Promise<T>) =>
+    withReconnect(
+      context,
+      storageDir,
+      (key: string) => fn(readOnly(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key }))),
+      currentKey,
+      (fresh) => {
+        currentKey = fresh;
+      },
+    );
+
+  // 1. Which song: searched in PICA by what was typed.
+  const work = await pickSong(
+    context,
+    (text) => read((c) => searchWorks(c, text)),
+    "pica / import a song",
+    "bring a song's stems from your pica catalogue into this set. nothing in pica changes.",
+  );
+  if (!work) return;
+
+  // 2. Which recording, and its files.
+  const [recordings, files, workMeta] = await read(async (c) => {
+    const recs = toRecordingChoices(await c.read("pica_recordings_query", { work_id: work.id, limit: 50 }));
+    const fs = toImportFiles(await c.read("pica_audio_query", { work_id: work.id, limit: 200 }));
+    const inspected = (await c.read("pica_works_inspect", { id: work.id, sections: ["basic"] }).catch(
+      () => null,
+    )) as { work?: { metadata?: unknown } } | null;
+    return [recs, fs, inspected?.work?.metadata ?? null] as const;
+  });
+  let recordingId: string | null = null;
+  if (recordings.length > 1) {
+    await yieldBetweenModals();
+    const recAns = safeParse(
+      await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(importRecordingHtml(work.title, recordings))}`,
+        IMPORT_W,
+        Math.min(520, 200 + recordings.length * 34),
+      ),
+    ) as { cancelled?: boolean; id?: string };
+    if (recAns.cancelled || !recAns.id) return;
+    recordingId = recAns.id;
+  } else if (recordings.length === 1) {
+    recordingId = recordings[0]!.id;
+  }
+  const { stems, master } = filesForRecording(files, recordingId);
+  const offered = [...stems, ...(master ? [master] : [])];
+  if (offered.length === 0) {
+    await showLink(
+      context,
+      "pica — nothing to import",
+      `"${work.title}" has no audio in pica yet.`,
+      `${BASE_URL}/inspect/works/${work.id}`,
+    );
+    return;
+  }
+
+  // 3. Which files.
+  await yieldBetweenModals();
+  const filesAns = safeParse(
+    await context.ui.showModalDialog(
+      `data:text/html,${encodeURIComponent(
+        importFilesHtml(
+          work.title,
+          offered.map((f) => ({
+            id: f.id,
+            label: f.label,
+            length: formatLength(f.durationSeconds),
+            master: f === master,
+          })),
+        ),
+      )}`,
+      IMPORT_W,
+      IMPORT_FILES_H,
+    ),
+  ) as { cancelled?: boolean; ids?: string[]; prefix?: boolean };
+  if (filesAns.cancelled) return;
+  const chosen = offered.filter((f) => (filesAns.ids ?? []).includes(f.id));
+  if (chosen.length === 0) {
+    await showError(context, "nothing was ticked, so nothing was imported.");
+    return;
+  }
+
+  // 4. Tempo, asked only when it matters; the key is only reported.
+  const song = context.application.song;
+  const sessionHasContent = song.tracks.some((t) => t.arrangementClips.length > 0);
+  const tempo = songTempo(workMeta, files);
+  const plan = tempoPlan(tempo, song.tempo, sessionHasContent);
+  let answer: "song" | "session" | undefined;
+  if (plan.kind === "ask") {
+    await yieldBetweenModals();
+    const tAns = safeParse(
+      await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(importTempoHtml(plan.song.bpm, plan.song.source, plan.sessionBpm))}`,
+        IMPORT_W,
+        IMPORT_TEMPO_H,
+      ),
+    ) as { cancelled?: boolean; tempo?: string };
+    if (tAns.cancelled) return;
+    answer = tAns.tempo === "session" ? "session" : "song";
+  }
+  const choice = tempoChoice(plan, answer);
+  const keyLine = keyNote(songKey(workMeta, files), {
+    rootNote: song.rootNote,
+    scaleName: song.scaleName,
+    scaleMode: song.scaleMode,
+  });
+
+  // 5. Download, import into the project, one new track per file at bar 1.
+  if (choice.setTempo !== null) song.tempo = choice.setTempo;
+  const lines: string[] = [];
+  let cancelled = false;
+  await context.ui.withinProgressDialog(`importing "${work.title}"…`, { progress: 0 }, async (update, signal) => {
+    for (let i = 0; i < chosen.length; i++) {
+      const f = chosen[i]!;
+      if (signal.aborted) {
+        cancelled = true;
+        break;
+      }
+      const at = (part: number) => Math.round(((i + part) / chosen.length) * 100);
+      let temp = "";
+      let step: ImportStep | null = null;
+      try {
+        step = "download";
+        await update(`downloading ${f.label} (${i + 1} of ${chosen.length})…`, at(0));
+        const url = await read((c) => c.playbackUrl(f.id));
+        let last = -1;
+        temp = await downloadToFile(fetch, url, tempDir, tempFileName(f), {
+          signal,
+          onProgress: (fr) => {
+            const pct = fr === null ? at(0) : at(fr * 0.9);
+            if (pct !== last) {
+              last = pct;
+              void update(`downloading ${f.label} (${i + 1} of ${chosen.length})…`, pct);
+            }
+          },
+        });
+        step = "add";
+        await update(`adding ${f.label} to the set…`, at(0.95));
+        const imported = await context.resources.importIntoProject(temp);
+        const track = await song.createAudioTrack();
+        track.name = trackName(f, work.title, filesAns.prefix === true);
+        const clip = await track.createAudioClip({ filePath: imported, startTime: 0, isWarped: choice.warp });
+        if (choice.warp) clip.warpMode = WarpMode.Complex;
+        lines.push(`${f.label}: imported.`);
+      } catch (e) {
+        if (e instanceof ImportCancelled) {
+          cancelled = true;
+          break;
+        }
+        console.error("[pica import]", f.label, e);
+        lines.push(`${f.label}: not imported (${fileFailureReason(step)}).`);
+      } finally {
+        if (temp) await removeTemp(temp);
+      }
+    }
+  });
+  if (cancelled) lines.push("cancelled. the files listed as imported stay in the set; the rest weren't downloaded.");
+
+  // 6. Report.
+  if (plan.kind === "unknown") lines.push("tempo unknown, so the stems play as recorded.");
+  else if (choice.setTempo !== null) {
+    lines.push(`tempo set to ${choice.setTempo} bpm (${tempo!.source === "session" ? "from the session" : "measured"}). the stems play as recorded.`);
+  } else if (choice.warp) lines.push(`kept this set's tempo (${song.tempo} bpm); the stems are stretched to fit.`);
+  else lines.push(`the set is already at the song's tempo (${song.tempo} bpm).`);
+  if (keyLine) lines.push(keyLine);
+  await yieldBetweenModals();
+  await showDialog(context, importReportHtml(lines, `${BASE_URL}/inspect/works/${work.id}`), IMPORT_REPORT_H);
 }

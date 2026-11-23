@@ -1,6 +1,6 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { toPersonCandidates, candidateNames, resolvePersonId, fetchPeopleCandidates } from "../src/pica/people";
 
 describe("toPersonCandidates", () => {
@@ -75,17 +75,25 @@ describe("fetchPeopleCandidates", () => {
   }
 
   it("accumulates across full pages and stops on a short page", async () => {
-    const full = Array.from({ length: 200 }, (_, i) => ({ id: `a${i}`, name: `A${i}` }));
+    const full = Array.from({ length: 500 }, (_, i) => ({ id: `a${i}`, name: `A${i}` }));
     const short = [{ id: "z1", name: "Z1" }];
     const out = await fetchPeopleCandidates(pagedClient([full, short]));
-    expect(out).toHaveLength(201);
+    expect(out).toHaveLength(501);
+  });
+
+  // A nameless row is dropped, but the page PICA sent was still full.
+  it("keeps paging past a full page that had a row it couldn't use", async () => {
+    const full = Array.from({ length: 500 }, (_, i) => (i === 0 ? { id: "x", name: "" } : { id: `a${i}`, name: `A${i}` }));
+    const short = [{ id: "z1", name: "Féz" }];
+    const out = await fetchPeopleCandidates(pagedClient([full, short]));
+    expect(out.map((c) => c.name)).toContain("Féz");
   });
 
   it("dedupes ids across pages", async () => {
-    const p1 = Array.from({ length: 200 }, (_, i) => ({ id: `a${i}`, name: `A${i}` }));
+    const p1 = Array.from({ length: 500 }, (_, i) => ({ id: `a${i}`, name: `A${i}` }));
     const p2 = [{ id: "a0", name: "A0 again" }, { id: "new", name: "New" }]; // a0 repeats
     const out = await fetchPeopleCandidates(pagedClient([p1, p2]));
-    expect(out).toHaveLength(201); // 200 + 1 new, a0 deduped
+    expect(out).toHaveLength(501); // 500 + 1 new, a0 deduped
     expect(out.filter((c) => c.id === "a0")).toHaveLength(1);
   });
 });
@@ -126,19 +134,89 @@ describe("fetchEmailContacts", () => {
     const client = {
       callTool: async (name: string, args: any) => {
         calls.push({ name, args });
-        return { people: args.offset === 0 ? page(200, 0) : page(3, 200) };
+        return { people: args.offset === 0 ? page(500, 0) : page(3, 500) };
       },
     } as any;
     const contacts = await fetchEmailContacts(client);
-    expect(contacts).toHaveLength(203);
+    expect(contacts).toHaveLength(503);
     expect(calls).toEqual([
-      { name: "pica_people_query", args: { has_email: true, limit: 200, offset: 0 } },
-      { name: "pica_people_query", args: { has_email: true, limit: 200, offset: 200 } },
+      { name: "pica_people_query", args: { has_email: true, limit: 500, offset: 0 } },
+      { name: "pica_people_query", args: { has_email: true, limit: 500, offset: 500 } },
     ]);
   });
 
   it("lets an error through, so the caller falls back to a plain field", async () => {
     const client = { callTool: async () => { throw new Error("403"); } } as any;
     await expect(fetchEmailContacts(client)).rejects.toThrow("403");
+  });
+});
+
+// Founder smoke 2026-11-23 (twice): the account owner's own one-word name,
+// "Féz", sorts last in PICA's surname order, past what one dialog loads.
+describe("fetchPeopleCandidates with the account's own name", () => {
+  it("also searches PICA for the account's own name and keeps that person", async () => {
+    const calls: any[] = [];
+    const client = {
+      callTool: async (name: string, args: any) => {
+        calls.push(args);
+        if (args.query) return { people: [{ id: "me", name: "Féz", stage_names: ["SoundsLikeFez"] }] };
+        return { people: [{ id: "a1", name: "Felicia Alamu" }] };
+      },
+    } as any;
+    const out = await fetchPeopleCandidates(client, " Féz ");
+    expect(calls[0]).toEqual({ query: "Féz", limit: 50 });
+    expect(out.map((c) => c.id)).toEqual(["me", "a1"]);
+    expect(resolvePersonId("Féz", out)).toBe("me");
+  });
+
+  it("still loads the list when the name search fails, and skips it with no name", async () => {
+    const calls: any[] = [];
+    const client = {
+      callTool: async (_n: string, args: any) => {
+        calls.push(args);
+        if (args.query) throw new Error("down");
+        return { people: [{ id: "a1", name: "Felicia Alamu" }] };
+      },
+    } as any;
+    expect((await fetchPeopleCandidates(client, "Féz")).map((c) => c.id)).toEqual(["a1"]);
+    calls.length = 0;
+    await fetchPeopleCandidates(client, null);
+    expect(calls.some((a) => a.query)).toBe(false);
+  });
+});
+
+import { searchPeople } from "../src/pica/people";
+
+// b9 2026-11-23: any one-word name or band past the loaded list was invisible,
+// so the artist is also searched in PICA by what was typed.
+describe("searchPeople", () => {
+  it("asks PICA with what was typed and shapes the matches", async () => {
+    const calls: any[] = [];
+    const client = {
+      callTool: async (name: string, args: any) => {
+        calls.push([name, args]);
+        return { people: [{ id: "b1", name: "Lagbaja", stage_names: [] }] };
+      },
+    } as any;
+    expect((await searchPeople(client, "  lagba ")).map((c) => c.id)).toEqual(["b1"]);
+    expect(calls).toEqual([["pica_people_query", { query: "lagba", limit: 10 }]]);
+  });
+
+  it("asks nothing for an empty name", async () => {
+    const client = { callTool: vi.fn() } as any;
+    expect(await searchPeople(client, " ")).toEqual([]);
+    expect(client.callTool).not.toHaveBeenCalled();
+  });
+});
+
+import { hasExactMatch } from "../src/pica/people";
+
+describe("hasExactMatch", () => {
+  it("is true for a name or stage name, case and spaces aside, and false otherwise", () => {
+    const c = [{ id: "a", name: "Jo Bloggs", stageNames: ["JB"] }];
+    expect(hasExactMatch(" jo bloggs ", c)).toBe(true);
+    expect(hasExactMatch("jb", c)).toBe(true);
+    expect(hasExactMatch("Jo", c)).toBe(false);
+    expect(hasExactMatch("", c)).toBe(false);
   });
 });

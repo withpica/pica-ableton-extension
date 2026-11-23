@@ -14,6 +14,13 @@ describe("FLAT_STYLE", () => {
     }
     expect(FLAT_STYLE).not.toContain("border-radius");
   });
+
+  // Founder smoke 2026-11-23: the writers and stems dialogs build inputs and
+  // selects with no class, and they rendered white.
+  it("styles classless inputs and selects dark, and asks for dark native controls", () => {
+    expect(FLAT_STYLE).toContain("color-scheme:dark");
+    expect(FLAT_STYLE).toContain("input:not([type=checkbox]):not([type=radio]):not([class]),select:not([class]){background:var(--surface)");
+  });
 });
 describe("withFlatStyle", () => {
   it("wraps body content in a doc that includes FLAT_STYLE once", () => {

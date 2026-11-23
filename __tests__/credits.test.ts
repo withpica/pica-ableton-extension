@@ -201,6 +201,21 @@ describe("saveCredits (one single-credit call per person)", () => {
   ];
   const TOOL = "pica_recording_credits_update";
 
+  // b9 2026-11-23: a performer past the loaded list, picked after a PICA
+  // search, is linked to the person picked, typed name kept as credited.
+  it("links a picked person by id, keyed by the typed name", async () => {
+    const c = fakeClient();
+    c.callTool.mockResolvedValue({ id: "credit" });
+    await saveCredits(c, "rec-1", rows, [], [], new Map([["maria", { id: "p-maria", name: "María", stageNames: [] }]]));
+    expect(c.callTool).toHaveBeenCalledWith(TOOL, {
+      recording_id: "rec-1",
+      credited_name: "Maria",
+      role: "Performer",
+      instrument: "keys",
+      person_id: "p-maria",
+    });
+  });
+
   it("calls pica_recording_credits_update once per merged person, single form, with the instrument", async () => {
     const c = fakeClient();
     c.callTool.mockResolvedValue({ id: "credit" });

@@ -325,6 +325,15 @@ export const LINK_MADE_BODY =
   "no one was emailed. anyone with this link can open it for 30 days. " +
   "to turn it off sooner, open the song in pica and press turn off on the link, under sharing.";
 
+/** Added to LINK_MADE_BODY when a typed note could not be put on the link. */
+export const LINK_NOTE_NOT_ADDED =
+  "your note wasn't added to the link, so its page won't show it. send the note to them yourself with the link.";
+
+/** The link-made panel's text; noteSaved false = a typed note didn't go on. */
+export function linkMadeBody(noteSaved?: boolean): string {
+  return noteSaved === false ? `${LINK_MADE_BODY} ${LINK_NOTE_NOT_ADDED}` : LINK_MADE_BODY;
+}
+
 /** Stem picker: one include/skip row per stem, before the deliver dialog.
  *  Bridges {ids: string[]} (the chosen stem ids) or {cancelled:true}. */
 export function shareStemsHtml(stems: StemChoice[]): string {
@@ -430,7 +439,9 @@ function leadLine(action: RegisterReport["action"], title: string): string {
 function ownershipLine(status?: MasterOwnershipOutcome["status"]): string | null {
   switch (status) {
     case "created":
-      return "master ownership: your org now owns 100% of this master. refine splits in PICA.";
+      // The share register writes has no owner (recording_splits holds only
+      // a person), so the recording page shows "unknown" (68, 2026-11-23).
+      return "master ownership: who owns this master isn't set yet. on the recording page in pica, end the share with no owner, then add the owner.";
     case "skipped_existing":
       return "master ownership: already set.";
     case "failed":
@@ -500,8 +511,11 @@ export function finalReportHtml(report: RegisterReport): string {
     );
   }
   const links =
-    reportLinkRow("view the work", `${BASE_URL}/inspect/works/${report.workId}`, 0) +
-    reportLinkRow("view the recording (upload your master here)", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
+    // The master is uploaded from the song page's audio step, which files it
+    // as the master of the song's recording; the recording page showed no
+    // upload for it (founder smoke 2026-11-23).
+    reportLinkRow("view the work (upload your master in its audio step)", `${BASE_URL}/inspect/works/${report.workId}`, 0) +
+    reportLinkRow("view the recording", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
     reportLinkRow("open your catalog", `${BASE_URL}/inspect`, 2);
   return withFlatStyle(
     `<div class="h">pica / registered</div>` +
@@ -513,5 +527,184 @@ export function finalReportHtml(report: RegisterReport): string {
     `<button onclick="${bridgeSend("'sendStems'")}">log stems →</button> ` +
     `<button class="btn-primary" onclick="${bridgeSend("'deliver'")}">share with →</button>` +
     `</div>`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Import from PICA (ADR-259)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which song: a plain field, nothing suggested until PICA is searched with
+ * what was typed. `notice` says why it is asked again (no match). Shared by
+ * import and share. Bridges {value} or {cancelled:true}.
+ */
+export function songSearchHtml(heading: string, hint: string, notice = "", value = ""): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const findJs = bridgeSend("JSON.stringify({value:document.getElementById('w').value.trim()})");
+  return withFlatStyle(
+    `<div class="h">${escapeHtml(heading)}</div>` +
+    `<div class="hint">${escapeHtml(hint)}</div>` +
+    (notice ? `<div class="hint">${escapeHtml(notice)}</div>` : "") +
+    `<div class="label">song</div>` +
+    `<input class="input" id="w" autocomplete="off" value="${escapeHtml(value)}" placeholder="part of the title, or the artist">` +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(findJs)}">find</button></div>`,
+  );
+}
+
+/** The songs a search found, the first chosen. Bridges {id}, {again:true} or {cancelled:true}. */
+export function songPickHtml(heading: string, query: string, labels: ReadonlyArray<{ id: string; label: string }>): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const againJs = bridgeSend("JSON.stringify({again:true})");
+  const nextJs = bridgeSend(
+    "JSON.stringify({id:(document.querySelector('input[name=s]:checked')||{}).value||''})",
+  );
+  const rows = labels
+    .map(
+      (w, i) =>
+        `<label class="check"><input type="radio" name="s" value="${escapeHtml(w.id)}"${i === 0 ? " checked" : ""}> ` +
+        `${escapeHtml(w.label)}</label>`,
+    )
+    .join("");
+  return withFlatStyle(
+    `<div class="h">${escapeHtml(heading)}</div>` +
+    `<div class="hint">songs in your catalogue matching "${escapeHtml(query)}":</div>` +
+    rows +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button onclick="${escapeHtml(againJs)}">search again</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(nextJs)}">next</button></div>`,
+  );
+}
+
+/**
+ * After a panel with person names (the register artist, a credit, a writer):
+ * the people PICA found for a typed name that matched no loaded person,
+ * or a new person by that name. A match whose name is the typed one, accents
+ * and case aside, is chosen first; otherwise "a new person". Bridges {id}
+ * ("" = a new person) or {cancelled:true}.
+ */
+export function personPickHtml(
+  role: "artist" | "performer" | "writer",
+  typed: string,
+  matches: ReadonlyArray<{ id: string; label: string; same: boolean }>,
+): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const nextJs = bridgeSend(
+    "JSON.stringify({id:(document.querySelector('input[name=a]:checked')||{value:''}).value})",
+  );
+  const sameIdx = matches.findIndex((m) => m.same);
+  const rows =
+    matches
+      .map(
+        (m, i) =>
+          `<label class="check"><input type="radio" name="a" value="${escapeHtml(m.id)}"${i === sameIdx ? " checked" : ""}> ` +
+          `${escapeHtml(m.label)}</label>`,
+      )
+      .join("") +
+    `<label class="check"><input type="radio" name="a" value=""${sameIdx < 0 ? " checked" : ""}> ` +
+    `a new person named "${escapeHtml(typed)}"</label>`;
+  return withFlatStyle(
+    `<div class="h">pica / which ${role}?</div>` +
+    `<div class="hint">people in your catalogue matching "${escapeHtml(typed)}":</div>` +
+    rows +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(nextJs)}">next</button></div>`,
+  );
+}
+
+/** Which recording, when a song has more than one. Bridges {id} or {cancelled:true}. */
+export function importRecordingHtml(
+  songTitle: string,
+  recordings: ReadonlyArray<{ id: string; title: string; versionType: string }>,
+): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const nextJs = bridgeSend(
+    "JSON.stringify({id:(document.querySelector('input[name=r]:checked')||{}).value||''})",
+  );
+  const rows = recordings
+    .map(
+      (r, i) =>
+        `<label class="check"><input type="radio" name="r" value="${escapeHtml(r.id)}"${i === 0 ? " checked" : ""}> ` +
+        `${escapeHtml(r.title)}${r.versionType ? ` <span class="type">${escapeHtml(r.versionType)}</span>` : ""}</label>`,
+    )
+    .join("");
+  return withFlatStyle(
+    `<div class="h">pica / which recording of "${escapeHtml(songTitle)}"</div>` +
+    rows +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(nextJs)}">next</button></div>`,
+  );
+}
+
+/** Which files: every stem ticked, the master unticked, each with its length.
+ *  Bridges {ids, prefix} or {cancelled:true}. */
+export function importFilesHtml(
+  songTitle: string,
+  files: ReadonlyArray<{ id: string; label: string; length: string; master: boolean }>,
+): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const importJs = bridgeSend(
+    "JSON.stringify({ids:Array.prototype.map.call(document.querySelectorAll('input[name=f]:checked'),function(c){return c.value})," +
+      "prefix:document.getElementById('p').checked})",
+  );
+  const rows = files
+    .map(
+      (f) =>
+        `<label class="check"><input type="checkbox" name="f" value="${escapeHtml(f.id)}"${f.master ? "" : " checked"}> ` +
+        `${escapeHtml(f.label)}${f.master ? " (master)" : ""}` +
+        `${f.length ? ` <span class="type">${escapeHtml(f.length)}</span>` : ""}</label>`,
+    )
+    .join("");
+  return withFlatStyle(
+    `<div class="h">pica / import "${escapeHtml(songTitle)}"</div>` +
+    `<div class="hint">each file goes on its own new track, all starting at bar 1.</div>` +
+    rows +
+    `<div class="divider"></div>` +
+    `<label class="check"><input type="checkbox" id="p"> start each track name with the song title</label>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(importJs)}">import</button></div>`,
+  );
+}
+
+/** The tempo question, asked only when the song and the set differ.
+ *  Bridges {tempo:'song'|'session'} or {cancelled:true}. */
+export function importTempoHtml(songBpm: number, source: "session" | "measured", sessionBpm: number): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const nextJs = bridgeSend(
+    "JSON.stringify({tempo:(document.querySelector('input[name=t]:checked')||{}).value||'song'})",
+  );
+  const from = source === "session" ? "from the session it was made in" : "measured from the audio";
+  return withFlatStyle(
+    `<div class="h">pica / tempo</div>` +
+    `<div class="hint">the song is ${escapeHtml(fmtBpm(songBpm))} bpm (${from}). this set is ${escapeHtml(fmtBpm(sessionBpm))} bpm.</div>` +
+    `<label class="check"><input type="radio" name="t" value="song" checked> use the song's tempo (${escapeHtml(fmtBpm(songBpm))} bpm). the stems play exactly as recorded.</label>` +
+    `<label class="check"><input type="radio" name="t" value="session"> keep this set's tempo (${escapeHtml(fmtBpm(sessionBpm))} bpm) and stretch the stems. stretching may not sound perfect.</label>` +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(nextJs)}">import</button></div>`,
+  );
+}
+
+function fmtBpm(bpm: number): string {
+  return Number.isInteger(bpm) ? String(bpm) : bpm.toFixed(1);
+}
+
+/** The end of an import: one line per file, the tempo and key lines, and the
+ *  link back to the song in PICA. */
+export function importReportHtml(lines: readonly string[], songUrl: string): string {
+  const safeUrl = escapeHtml(songUrl);
+  return withFlatStyle(
+    `<div class="h">pica / imported</div>` +
+    lines.map((l) => `<div class="hint">${escapeHtml(l)}</div>`).join("") +
+    `<div class="label" style="margin-top:12px">credits on this song</div>` +
+    `<div class="kv"><span class="v"><a id="u" href="${safeUrl}" target="_blank">${safeUrl}</a></span>` +
+    `<button onclick="${escapeHtml(copyLinkJs("u"))}" style="margin-left:8px">copy link</button></div>` +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${CLOSE_JS}">close</button></div>`,
   );
 }

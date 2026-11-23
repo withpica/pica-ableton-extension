@@ -213,7 +213,10 @@ export async function saveCredits(
   rows: CreditRow[],
   existing: ExistingCredit[],
   candidates: PersonCandidate[] = [],
+  /** People picked for typed names after a PICA search, keyed by the typed name. */
+  picked: ReadonlyMap<string, PersonCandidate> = new Map(),
 ): Promise<CreditOutcome[]> {
+  const pickedByKey = new Map([...picked].map(([k, v]) => [norm(k), v] as const));
   const merged = mergeRowsByPerson(rows);
   if (merged.length === 0) return [];
 
@@ -227,7 +230,7 @@ export async function saveCredits(
       if (existingKey.has(`${norm(m.performerName)}|${ROLE}`)) {
         return { ...base, status: "skipped_existing" };
       }
-      const personId = resolvePersonId(m.performerName, candidates);
+      const personId = pickedByKey.get(norm(m.performerName))?.id ?? resolvePersonId(m.performerName, candidates);
       try {
         await client.callTool("pica_recording_credits_update", {
           recording_id: recordingId,

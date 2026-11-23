@@ -137,20 +137,40 @@ describe("createWorkLink (a link, no email)", () => {
 
   it("makes a work link like an emailed share: every file, download on, 30 days, no recipient", async () => {
     const client = fakeClient(() => ({ id: "l1", share_url: "https://withpica.com/share/abc" }));
-    const r = await createWorkLink({ client }, { ...linkBase, note: "  rough mix  " });
+    const r = await createWorkLink({ client }, linkBase);
     expect(r).toEqual({ state: "made", shareUrl: "https://withpica.com/share/abc", linkId: "l1" });
     const [name, args] = client.callTool.mock.calls[0]!;
     expect(name).toBe("pica_share_links_create");
     expect(args).toEqual({
       work_id: "w1",
       name: "Wave",
-      personal_message: "rough mix",
       expires_at: "2026-12-22T12:00:00.000Z",
       allow_download: true,
       allow_streaming: true,
       include_all_files: true,
     });
     expect(args).not.toHaveProperty("sent_to_emails");
+  });
+
+  // Founder smoke 2026-11-23: the create route refuses personal_message
+  // ("unknown field"), so the note goes on with pica_share_links_update.
+  it("adds a typed note with an update after the link is made, never on create", async () => {
+    const client = fakeClient((name: string) =>
+      name === "pica_share_links_create" ? { id: "l1", share_url: "https://withpica.com/share/abc" } : { id: "l1" },
+    );
+    const r = await createWorkLink({ client }, { ...linkBase, note: "  rough mix  " });
+    expect(r).toEqual({ state: "made", shareUrl: "https://withpica.com/share/abc", linkId: "l1", noteSaved: true });
+    expect(client.callTool.mock.calls[0]![1]).not.toHaveProperty("personal_message");
+    expect(client.callTool.mock.calls[1]).toEqual(["pica_share_links_update", { id: "l1", personal_message: "rough mix" }]);
+  });
+
+  it("still reports the link when the note can't be added", async () => {
+    const client = fakeClient((name: string) => {
+      if (name === "pica_share_links_create") return { id: "l1", share_url: "https://withpica.com/share/abc" };
+      throw new PicaMcpError("PICA returned HTTP 500", "500");
+    });
+    const r = await createWorkLink({ client }, { ...linkBase, note: "rough mix" });
+    expect(r).toMatchObject({ state: "made", noteSaved: false });
   });
 
   it("carries the chosen stems and download off", async () => {
@@ -176,7 +196,7 @@ describe("createWorkLink (a link, no email)", () => {
     const returned = fakeClient(() => ({ error_code: "SHARE_ERROR", error: "work not found" }));
     expect(await createWorkLink({ client: returned }, linkBase)).toMatchObject({
       state: "error",
-      message: "work not found",
+      message: "something went wrong. try again, or make the link on the song in pica.",
     });
   });
 });
@@ -195,12 +215,10 @@ describe("recipientEmail", () => {
 import { linkErrorMessage } from "../src/pica/deliver";
 
 describe("linkErrorMessage (never raw error text)", () => {
-  it("uses the API's own message when there is one", () => {
-    expect(linkErrorMessage('API request failed: 404 {"error":"work not found"}')).toBe("work not found");
-    expect(linkErrorMessage("work not found")).toBe("work not found");
-  });
-  it("falls back to plain words for transport failures", () => {
+  it("falls back to plain words for every failure, the API's own message included", () => {
     for (const raw of [
+      'API request failed: 404 {"error":"work not found"}',
+      "unknown field 'personal_message' on share-links — allowed fields: work_id, name",
       "PICA returned HTTP 500 for pica_share_links_create: <html>",
       "Network error calling pica_share_links_create: ECONNRESET",
       'API request failed: 500 {"nope":1}',

@@ -116,4 +116,32 @@ export class PicaMcpClient {
     const body = sc && typeof sc === "object" ? sc : parsed;
     return unwrapEnvelope(body) as T;
   }
+
+  /**
+   * A read-only GET on PICA's REST API with the same key (`path` starts with
+   * "/api/"). Used only where MCP exposes no equivalent, e.g. an audio file's
+   * signed download URL. Returns the `data` of the JSON envelope. Throws
+   * PicaMcpError on any failure, with the HTTP status as its code.
+   */
+  async restGet<T = unknown>(path: string): Promise<T> {
+    if (!path.startsWith("/api/")) throw new PicaMcpError(`not a PICA API path: ${path}`);
+    let res: Response;
+    try {
+      res = await this.fetchFn(`${this.cfg.baseUrl}${path}`, {
+        method: "GET",
+        headers: { Accept: "application/json", Authorization: `Bearer ${this.cfg.apiKey}` },
+      });
+    } catch (e) {
+      throw new PicaMcpError(`Network error calling ${path}: ${(e as Error).message}`);
+    }
+    const raw = await res.text();
+    if (!res.ok) throw new PicaMcpError(`PICA returned HTTP ${res.status} for ${path}`, String(res.status));
+    let body: any;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      throw new PicaMcpError(`PICA returned something other than JSON for ${path}`);
+    }
+    return unwrapEnvelope(body) as T;
+  }
 }

@@ -11,6 +11,7 @@ import {
   deliverHtml,
   deliverConfirmHtml,
   LINK_MADE_BODY,
+  linkMadeBody,
   stemsReportHtml,
   shareStemsHtml,
   destinationRow,
@@ -86,7 +87,10 @@ describe("finalReportHtml", () => {
   });
 
   it("renders ownership lines and omits when undefined", () => {
-    expect(finalReportHtml({ ...base, masterOwnership: "created" })).toContain("your org now owns 100%");
+    // The share has no owner yet, so the line never claims one (e1/68, 2026-11-23).
+    expect(finalReportHtml({ ...base, masterOwnership: "created" })).toContain("who owns this master isn't set yet");
+    expect(finalReportHtml({ ...base, masterOwnership: "created" })).not.toContain("owns 100%");
+    expect(finalReportHtml({ ...base, masterOwnership: "created" })).toContain("end the share with no owner, then add the owner");
     expect(finalReportHtml({ ...base, masterOwnership: "skipped_existing" })).toContain("already set.");
     expect(finalReportHtml({ ...base, masterOwnership: "failed" })).toContain("could not be saved automatically");
     expect(finalReportHtml(base)).not.toContain("master ownership");
@@ -112,10 +116,13 @@ describe("finalReportHtml", () => {
     expect(finalReportHtml(base)).not.toContain("logged");
   });
 
-  it("renders a log-stems button and labels the recording link for the master upload", () => {
+  it("renders a log-stems button and points the master upload at the song page", () => {
     const html = finalReportHtml({ action: "registered", title: "X", workId: "w1", recordingId: "r1" });
     expect(html).toContain("log stems →");
-    expect(html).toContain("upload your master");
+    expect(html).toContain("upload your master in its audio step");
+    // Founder smoke 2026-11-23: the recording page showed no upload for it.
+    expect(html).toMatch(/inspect\/works\/w1[^<]*<[^]*upload your master|upload your master[^]*inspect\/works\/w1/);
+    expect(html).not.toContain("view the recording (upload");
   });
 });
 
@@ -512,5 +519,106 @@ describe("deliverHtml: known contacts and a plain link", () => {
     expect(LINK_MADE_BODY).toContain("no one was emailed");
     expect(LINK_MADE_BODY).toContain("turn off");
     expect(LINK_MADE_BODY).toContain("under sharing");
+  });
+
+  // e1 2026-11-23: pica's sharing section can't add a note to a link, so the
+  // line says to send the note with the link, not to add it there.
+  it("says when a typed note wasn't added, and only then", () => {
+    expect(linkMadeBody(false)).toContain("wasn't added");
+    expect(linkMadeBody(false)).toContain("send the note to them yourself");
+    expect(linkMadeBody(false)).not.toContain("add it on the song");
+    expect(linkMadeBody(true)).toBe(LINK_MADE_BODY);
+    expect(linkMadeBody(undefined)).toBe(LINK_MADE_BODY);
+  });
+});
+
+import {
+  songSearchHtml,
+  songPickHtml,
+  importRecordingHtml,
+  importFilesHtml,
+  importTempoHtml,
+  importReportHtml,
+} from "../src/dialogHtml";
+
+describe("import dialogs", () => {
+  // Founder smoke 2026-11-23: suggestions showed before anything was typed.
+  it("song search: a plain field, nothing suggested, the notice and the last search kept", () => {
+    const html = songSearchHtml("pica / import a song", "nothing in pica changes.", 'nothing matches "x"', 'Wave "live"');
+    expect(html).not.toContain("list=");
+    expect(html).not.toContain("<datalist");
+    expect(html).toContain("nothing in pica changes");
+    expect(html).toContain("nothing matches &quot;x&quot;");
+    expect(html).toContain('value="Wave &quot;live&quot;"');
+  });
+
+  it("song pick: one choice per match, the first chosen, escaped, with search again", () => {
+    const html = songPickHtml("pica / share a song", "wave", [
+      { id: "w1", label: 'Wave "live" — Ivy' },
+      { id: "w2", label: "Wave — Sol" },
+    ]);
+    expect(html).toContain('value="w1" checked');
+    expect(html).not.toContain('value="w2" checked');
+    expect(html).toContain("Wave &quot;live&quot; — Ivy");
+    expect(html).toContain("again:true");
+  });
+
+  it("recording: one choice per recording, the first chosen", () => {
+    const html = importRecordingHtml("Wave", [
+      { id: "r1", title: "Wave", versionType: "original" },
+      { id: "r2", title: "Wave (remix)", versionType: "remix" },
+    ]);
+    expect(html).toContain('value="r1" checked');
+    expect(html).not.toContain('value="r2" checked');
+  });
+
+  it("files: stems ticked, the master not, each with its length", () => {
+    const html = importFilesHtml("Wave", [
+      { id: "s1", label: "drums", length: "3:07", master: false },
+      { id: "m1", label: "wave", length: "3:07", master: true },
+    ]);
+    expect(html).toContain('value="s1" checked');
+    expect(html).toContain('value="m1">');
+    expect(html).toContain("wave (master)");
+    expect(html).toContain("3:07");
+    expect(html).toContain("all starting at bar 1");
+  });
+
+  it("tempo: the song's tempo is the default, stretching is labelled as such", () => {
+    const html = importTempoHtml(92, "session", 120);
+    expect(html).toContain('value="song" checked');
+    expect(html).toContain("use the song's tempo (92 bpm)");
+    expect(html).toContain("keep this set's tempo (120 bpm) and stretch the stems");
+    expect(html).toContain("from the session it was made in");
+    expect(importTempoHtml(119.5, "measured", 120)).toContain("measured from the audio");
+  });
+
+  it("report: the lines, and the link back to the song's credits", () => {
+    const html = importReportHtml(["drums: imported."], "https://withpica.com/inspect/works/w1");
+    expect(html).toContain("drums: imported.");
+    expect(html).toContain("credits on this song");
+    expect(html).toContain('href="https://withpica.com/inspect/works/w1"');
+  });
+});
+
+import { personPickHtml } from "../src/dialogHtml";
+
+describe("personPickHtml", () => {
+  it("chooses the match with the typed name, and offers a new person too", () => {
+    const html = personPickHtml("artist", "Fez", [
+      { id: "p1", label: "Fezile Dube", same: false },
+      { id: "p2", label: "Féz · SoundsLikeFez", same: true },
+    ]);
+    expect(html).toContain("pica / which artist?");
+    expect(html).toContain('value="p2" checked');
+    expect(html).not.toContain('value="p1" checked');
+    expect(html).toContain('value=""> a new person named "Fez"');
+  });
+
+  it("chooses a new person when no match has the typed name, escaped", () => {
+    const html = personPickHtml("writer", '<b>x</b>', [{ id: "p1", label: "Xavier", same: false }]);
+    expect(html).toContain("pica / which writer?");
+    expect(html).toContain('value="" checked> a new person named "&lt;b&gt;x&lt;/b&gt;"');
+    expect(html).not.toContain("<b>x</b>");
   });
 });

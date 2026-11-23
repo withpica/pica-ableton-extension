@@ -110,7 +110,7 @@ Install the packaged extension by dropping `dist/pica.ablx` onto Live's **Extens
 
 Right-click a track → **Register Set in PICA**. The confirm panel is editable; a duplicate title offers a choice instead of creating a second work.
 
-**Pick existing people.** The artist field (confirm panel) and the credit/writer name fields show a typeahead of the people already in your catalog — start typing and pick one to link the existing person instead of creating a near-duplicate. Picking is never forced: a genuinely new name still creates a person. (If the catalog can't be reached the fields just fall back to plain text.)
+**Pick existing people.** The artist field (confirm panel) and the credit/writer name fields show a typeahead of the people already in your catalog — start typing and pick one to link the existing person instead of creating a near-duplicate. Picking is never forced: a genuinely new name still creates a person. If a name you typed (the artist, a performer or a writer) wasn't one of the suggestions, PICA is searched for it when you confirm, and you choose between the people it finds and a new person. (If the catalog can't be reached the fields just fall back to plain text.)
 
 The flow runs the capture steps quietly and ends in **one consolidated final
 report** — what was captured (master ownership, credits, writers, Splice
@@ -122,9 +122,10 @@ and your **catalog**. The old per-step success popups are gone.
 catalog, you can either add credits to the existing recording or **register the
 Set as a new version** (a new recording under the same work) — pick the version
 type (alternate, remix, acoustic, live, cover, alternate master, demo). Any
-recording the extension *mints* (a fresh master, or a new version) is claimed
-as 100% org master ownership by default — a starting position you refine or
-reassign in `/inspect`; adding credits to a pre-existing recording claims nothing.
+recording the extension *mints* (a fresh master, or a new version) gets a 100%
+master share with no owner set yet: on the recording page in PICA, end the
+share with no owner, then add the owner. Adding credits to a pre-existing
+recording writes no share.
 
 **Credits checklist.** After register (or when re-running on an already-registered
 Set) a checklist opens: one row per performed part, instrument pre-filled from the
@@ -143,12 +144,14 @@ re-running never duplicates.
 to PICA** on an already-registered Set), pick which arrangement audio tracks to
 upload — each is rendered and filed as a `stem` under the recording, auto-linked.
 Rendering is **pre-FX**, so freeze & flatten a track first to capture it as you
-hear it. For the **master**, use the "upload your master" link to the recording's
-page and drop your exported mixdown there (browser upload, attaches automatically).
+hear it. For the **master**, use the "upload your master" link: it opens the song
+in PICA, whose audio step uploads your exported mixdown as the recording's master.
 Each stem is best-effort and reported individually; files over 800MB are skipped.
 
 **Share with….** Right-click a track → **Share with… (PICA)** (or "share with" on
-the final report) to send a registered work to someone:
+the final report) to send a registered work to someone. From the right-click,
+type part of the song's title (or the artist): PICA searches your catalog, and
+you pick the song from what it finds.
 
 - **By email.** Type an address, or start typing a name and pick someone in your
   catalog who already has an email on file. A new address still works; it is
@@ -158,7 +161,8 @@ the final report) to send a registered work to someone:
 - **Allow download** (on by default). Off, the recipient can listen but not
   download.
 - **Or just make a link.** Creates the same link without emailing anyone, with a
-  copy button, for you to send however you like.
+  copy button, for you to send however you like. A message you typed shows on
+  the link's page.
 
 The recipient gets a PICA page with a player that plays the shared stems in
 sync (mute, solo and volume per stem). Every share is a link: PICA counts its
@@ -167,17 +171,35 @@ PICA and press **turn off** on the link, under **sharing**. The first time you
 email someone who isn't in your catalog or on PICA, PICA asks you to confirm
 the address.
 
+**Import from PICA.** Right-click a track → **Import from PICA…** to bring a
+song's audio from your catalog into the open Set. Type part of the song's title
+(or the artist), pick the song from what PICA finds (and the recording, if it
+has more than one), tick the files you want (every stem is
+ticked; the master is offered but not ticked), and each one lands on its own new
+track, all starting at bar 1 so they stay in sync. Nothing in PICA changes.
+
+- **Tempo.** If the song was registered from Ableton, PICA knows the exact tempo
+  of that session; otherwise it uses the tempo measured from the audio. An empty
+  Set takes the song's tempo. If your Set already has clips at another tempo,
+  you choose: use the song's tempo (the stems play exactly as recorded), or keep
+  your Set's tempo and stretch the stems (warping, which may not sound perfect).
+  If PICA doesn't know the tempo, the stems come in as recorded.
+- **Key.** Ableton doesn't let an extension change the Set's key or repitch
+  audio, so the import only tells you the song's key next to your Set's.
+- The end report lists what came in and links to the song in PICA, with its
+  credits.
+
 **The master isn't rendered here.** The Extensions SDK can only render an audio
 track **before its effects** (`renderPreFxAudio`), and has no way to render the
 master bus or a full mixdown. So stems come from the extension; the master is
-a manual **File → Export Audio/Video** in Live, then an upload on the
-recording's page in PICA (the "upload your master" link). A share includes
+a manual **File → Export Audio/Video** in Live, then an upload from the song's
+audio step in PICA (the "upload your master" link). A share includes
 whatever audio is on the work at the time.
 
 ## How it works
 
 - Reads the **whole Set** via `context.application.song` — independent of which track you right-clicked (the SDK has no global/Set menu scope, so the action is offered on tracks).
-- Writes over PICA's **MCP JSON-RPC endpoint** (`/api/mcp`): declares identity (`pica_introduce_self`), then `pica_register_set` — a single call that creates the work (with the session snapshot in `metadata`), its master recording, and the 100% org-owned master ownership split in one round-trip (collapsing what used to be `pica_works_create` + `pica_recordings_create` + `pica_recording_splits_create`). The capture steps follow, each in a single batched call — `pica_recording_credits_update` (one call per performer, all at once, so each instrument saves and each performer reports saved or failed on its own), `pica_work_writers_add` (all writers), and `pica_recording_samples_add` (Splice). Stems render via the SDK's `renderPreFxAudio` and upload direct-to-storage (`pica_audio_presigned_upload` → HTTP PUT → `pica_audio_complete_upload` → `pica_audio_analyze`). This instrumented path makes the new work appear **live in PICA's `/inspect` activity rail**.
+- Writes over PICA's **MCP JSON-RPC endpoint** (`/api/mcp`): declares identity (`pica_introduce_self`), then `pica_register_set` — a single call that creates the work (with the session snapshot in `metadata`), its master recording, and a 100% master split (no owner set yet) in one round-trip (collapsing what used to be `pica_works_create` + `pica_recordings_create` + `pica_recording_splits_create`). The capture steps follow, each in a single batched call — `pica_recording_credits_update` (one call per performer, all at once, so each instrument saves and each performer reports saved or failed on its own), `pica_work_writers_add` (all writers), and `pica_recording_samples_add` (Splice). Stems render via the SDK's `renderPreFxAudio` and upload direct-to-storage (`pica_audio_presigned_upload` → HTTP PUT → `pica_audio_complete_upload` → `pica_audio_analyze`). This instrumented path makes the new work appear **live in PICA's `/inspect` activity rail**.
 - **Architecture:** a pure, host-independent core (`src/pica/*`, `src/session/snapshot.ts`) unit-tested with Vitest, plus thin Ableton host glue (`src/extension.ts`, `ui/interface.html`). Run `npm test` to exercise the core without Live.
 
 ## License / IP

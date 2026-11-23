@@ -143,8 +143,14 @@ export interface LinkArgs {
 }
 
 export type LinkResult =
-  | { state: "made"; shareUrl: string; linkId: string | null }
-  | { state: "error"; message: string; code?: string };
+  | {
+      state: "made";
+      shareUrl: string;
+      linkId: string | null;
+      /** Set only when a note was typed: whether it was added to the link. */
+      noteSaved?: boolean;
+    }
+  | { state: "error"; message: string; code?: string; /** The raw reason, for the console only. */ detail?: string };
 
 /** The same 30 days an emailed share lasts (pica_share_send's default). */
 const LINK_DAYS = 30;
@@ -164,7 +170,8 @@ export async function createWorkLink(deps: DeliverDeps, args: LinkArgs): Promise
   const payload: Record<string, unknown> = {
     work_id: args.workId,
     name: args.workTitle.trim() || "shared from Ableton",
-    personal_message: args.note?.trim() || undefined,
+    // No personal_message here: the create route refuses it (it is not in
+    // SHARE_LINK_POST_ALLOWED_FIELDS in PICA), though the update accepts it.
     expires_at: expires.toISOString(),
     allow_download: args.allowDownload,
     allow_streaming: true,
@@ -176,39 +183,44 @@ export async function createWorkLink(deps: DeliverDeps, args: LinkArgs): Promise
   try {
     r = await deps.client.callTool("pica_share_links_create", payload);
   } catch (e) {
-    return { state: "error", message: linkErrorMessage(e instanceof PicaMcpError ? e.message : ""), code: e instanceof PicaMcpError ? e.code : undefined };
+    const detail = e instanceof Error ? e.message : String(e);
+    return { state: "error", message: linkErrorMessage(detail), code: e instanceof PicaMcpError ? e.code : undefined, detail };
   }
   if (r && typeof r === "object" && r.error_code) {
-    const msg = typeof r.error === "string" ? r.error : "";
-    return { state: "error", message: linkErrorMessage(msg, r.suggestion), code: r.error_code };
+    const detail = typeof r.error === "string" ? r.error : "";
+    return { state: "error", message: linkErrorMessage(detail, r.suggestion), code: r.error_code, detail };
   }
   const shareUrl = typeof r?.share_url === "string" ? r.share_url : "";
   // Never report a link that isn't there: no share_url is a failure.
   if (!shareUrl) {
     return { state: "error", message: "pica didn't send the link back. look under sharing on the song in pica." };
   }
-  return { state: "made", shareUrl, linkId: typeof r?.id === "string" ? r.id : null };
+  const linkId = typeof r?.id === "string" ? r.id : null;
+  const note = args.note?.trim();
+  if (!note) return { state: "made", shareUrl, linkId };
+  // The note, shown on the share page as a quote, goes on with an update.
+  // Best-effort: the link already exists, so a failure here is reported
+  // beside it rather than as a failed link.
+  let noteSaved = false;
+  if (linkId) {
+    try {
+      const u: any = await deps.client.callTool("pica_share_links_update", { id: linkId, personal_message: note });
+      noteSaved = !(u && typeof u === "object" && u.error_code);
+    } catch {
+      noteSaved = false;
+    }
+  }
+  return { state: "made", shareUrl, linkId, noteSaved };
 }
 
 const LINK_ERROR_FALLBACK = "something went wrong. try again, or make the link on the song in pica.";
 
 /**
- * What a failed link says: the API's own message when it has one (nested in an
- * "API request failed: <status> {json}" message, or returned as `error`), or a
- * plain fallback. Never the raw transport text (status lines, JSON, stack).
+ * What a failed link says: always plain words. The API's own message names
+ * fields and routes ("unknown field 'personal_message' on share-links —
+ * allowed fields: …", founder smoke 2026-11-23), so it never reaches the
+ * screen; extension.ts logs it to the console instead.
  */
-export function linkErrorMessage(rawMessage: string, suggestion?: string): string {
-  const start = rawMessage.indexOf("{");
-  if (start >= 0) {
-    try {
-      const p = JSON.parse(rawMessage.slice(start));
-      if (typeof p.error === "string" && p.error.trim()) return p.error.trim();
-    } catch {
-      /* not JSON */
-    }
-    return suggestion?.trim() || LINK_ERROR_FALLBACK;
-  }
-  const plain = rawMessage.trim();
-  if (plain && !/^(PICA returned HTTP|Network error|JSON-RPC|Tool )/.test(plain)) return plain;
-  return suggestion?.trim() || LINK_ERROR_FALLBACK;
+export function linkErrorMessage(_rawMessage: string, _suggestion?: string): string {
+  return LINK_ERROR_FALLBACK;
 }
