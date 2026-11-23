@@ -89,3 +89,56 @@ describe("fetchPeopleCandidates", () => {
     expect(out.filter((c) => c.id === "a0")).toHaveLength(1);
   });
 });
+
+import { toEmailContacts, fetchEmailContacts } from "../src/pica/people";
+
+describe("toEmailContacts", () => {
+  it("keeps people with a name and a usable email, one per email", () => {
+    expect(
+      toEmailContacts({
+        people: [
+          { id: "1", name: "Sarah Holt", email: "sarah@band.com" },
+          { id: "2", name: "Sarah H", email: "SARAH@band.com" },
+          { id: "3", name: "No Email", email: null },
+          { id: "4", name: "Bad", email: "not-an-email" },
+          { id: "5", name: "  ", email: "blank@band.com" },
+          { id: "6", name: "Tom", email: " tom@band.com " },
+        ],
+      }),
+    ).toEqual([
+      { name: "Sarah Holt", email: "sarah@band.com" },
+      { name: "Tom", email: "tom@band.com" },
+    ]);
+  });
+
+  it("accepts a bare array and returns [] for junk", () => {
+    expect(toEmailContacts([{ name: "A", email: "a@b.co" }])).toHaveLength(1);
+    expect(toEmailContacts(null)).toEqual([]);
+    expect(toEmailContacts({})).toEqual([]);
+  });
+});
+
+describe("fetchEmailContacts", () => {
+  it("asks only for people with an email, page by page, until a short page", async () => {
+    const calls: any[] = [];
+    const page = (n: number, from: number) =>
+      Array.from({ length: n }, (_, i) => ({ name: `P${from + i}`, email: `p${from + i}@x.co` }));
+    const client = {
+      callTool: async (name: string, args: any) => {
+        calls.push({ name, args });
+        return { people: args.offset === 0 ? page(200, 0) : page(3, 200) };
+      },
+    } as any;
+    const contacts = await fetchEmailContacts(client);
+    expect(contacts).toHaveLength(203);
+    expect(calls).toEqual([
+      { name: "pica_people_query", args: { has_email: true, limit: 200, offset: 0 } },
+      { name: "pica_people_query", args: { has_email: true, limit: 200, offset: 200 } },
+    ]);
+  });
+
+  it("lets an error through, so the caller falls back to a plain field", async () => {
+    const client = { callTool: async () => { throw new Error("403"); } } as any;
+    await expect(fetchEmailContacts(client)).rejects.toThrow("403");
+  });
+});

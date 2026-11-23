@@ -4,7 +4,7 @@ Register your Ableton Live Set as a **work + master recording** in [PICA](https:
 
 Right-click a track → **Register Set in PICA** → a confirm panel shows the captured session (tracks, devices, samples, tempo, key). You add a title + artist; it creates one `work` and its master `recording` in your catalog and gives you the link. The full session snapshot is stashed on the work for later enrichment. Nothing is written until you confirm.
 
-This covers **Stages 1–3** of ADR-259 ("PICA inside the DAW") plus the register-flow refinements that followed: register-from-Set, the attribution checklist (per-instrument draft credits, expandable per group), composition writers, automatic Splice-sample attribution, master-ownership capture, an existing-people typeahead for the artist/credit/writer fields, a single consolidated final report, and uploading audio (stems rendered in-extension; the master via a one-click web upload). A later stage adds deliver-from-DAW.
+This covers **Stages 1–3** of ADR-259 ("PICA inside the DAW") plus the register-flow refinements that followed: register-from-Set, the attribution checklist (per-instrument draft credits, expandable per group), composition writers, automatic Splice-sample attribution, master-ownership capture, an existing-people typeahead for the artist/credit/writer fields, a single consolidated final report, uploading audio (stems rendered in-extension; the master via a one-click web upload), and sharing a registered work from inside Live (Stage 5).
 
 ## Requirements
 
@@ -146,6 +146,33 @@ Rendering is **pre-FX**, so freeze & flatten a track first to capture it as you
 hear it. For the **master**, use the "upload your master" link to the recording's
 page and drop your exported mixdown there (browser upload, attaches automatically).
 Each stem is best-effort and reported individually; files over 800MB are skipped.
+
+**Share with….** Right-click a track → **Share with… (PICA)** (or "share with" on
+the final report) to send a registered work to someone:
+
+- **By email.** Type an address, or start typing a name and pick someone in your
+  catalog who already has an email on file. A new address still works; it is
+  not saved to anyone's record. Add an optional message.
+- **Pick the stems.** When the work has more than one audio file, choose which to
+  include.
+- **Allow download** (on by default). Off, the recipient can listen but not
+  download.
+- **Or just make a link.** Creates the same link without emailing anyone, with a
+  copy button, for you to send however you like.
+
+The recipient gets a PICA page with a player that plays the shared stems in
+sync (mute, solo and volume per stem). Every share is a link: PICA counts its
+views, it ends after 30 days, and you can turn it off sooner: open the song in
+PICA and press **turn off** on the link, under **sharing**. The first time you
+email someone who isn't in your catalog or on PICA, PICA asks you to confirm
+the address.
+
+**The master isn't rendered here.** The Extensions SDK can only render an audio
+track **before its effects** (`renderPreFxAudio`), and has no way to render the
+master bus or a full mixdown. So stems come from the extension; the master is
+a manual **File → Export Audio/Video** in Live, then an upload on the
+recording's page in PICA (the "upload your master" link). A share includes
+whatever audio is on the work at the time.
 
 ## How it works
 

@@ -39,7 +39,14 @@ import {
   type PrefillNode,
 } from "./pica/credits";
 import { saveWriters, type WriterOutcome } from "./pica/writers";
-import { fetchPeopleCandidates, candidateNames, resolvePersonId, type PersonCandidate } from "./pica/people";
+import {
+  fetchPeopleCandidates,
+  candidateNames,
+  resolvePersonId,
+  fetchEmailContacts,
+  type PersonCandidate,
+  type EmailContact,
+} from "./pica/people";
 import { peopleSuggestScript, toSuggestPeople } from "./peopleSuggest";
 import { detectSpliceSamples, saveSpliceSamples } from "./pica/samples";
 import {
@@ -49,6 +56,7 @@ import {
   duplicateChoiceHtml,
   titlePromptHtml,
   deliverHtml,
+  LINK_MADE_BODY,
   deliverConfirmHtml,
   stemsReportHtml,
   shareStemsHtml,
@@ -57,7 +65,7 @@ import {
   type RegisterReport,
   type StepResult,
 } from "./dialogHtml";
-import { deliverWork, isDeliverableEmail } from "./pica/deliver";
+import { deliverWork, isDeliverableEmail, createWorkLink, recipientEmail } from "./pica/deliver";
 import { mapAudioQueryToStems, selectionParam } from "./pica/shareStems";
 import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } from "./session/renderTargets";
 import { locatorOptions, resolveRange, type CueLike, type RangeChoice } from "./session/locatorRange";
@@ -74,6 +82,7 @@ import {
   stemPhaseLabel,
   IDLE_LINES,
   deliverPhaseLabel,
+  linkPhaseLabel,
   registerPhaseLabel,
   creditsPhaseLabel,
   writersPhaseLabel,
@@ -797,14 +806,57 @@ async function runDeliver(
     // best-effort: skip the picker on any query error
   }
 
+  // The catalogue's people with an email, to fill the recipient. Best-effort
+  // (no suggestions on any error) and held only for this dialog: not stored,
+  // not logged.
+  let contacts: EmailContact[] = [];
+  try {
+    contacts = await run((c) => fetchEmailContacts(c));
+  } catch {
+    contacts = [];
+  }
+
   const raw = await context.ui.showModalDialog(
-    `data:text/html,${encodeURIComponent(deliverHtml(workTitle, destination))}`,
+    `data:text/html,${encodeURIComponent(deliverHtml(workTitle, destination, contacts))}`,
     DELIVER_W,
     DELIVER_H,
   );
-  const ans = safeParse(raw) as { cancelled?: boolean; email?: string; note?: string; allowDownload?: boolean };
+  const ans = safeParse(raw) as {
+    cancelled?: boolean;
+    mode?: string;
+    email?: string;
+    note?: string;
+    allowDownload?: boolean;
+  };
   if (ans.cancelled) return;
-  const email = (ans.email ?? "").trim();
+
+  if (ans.mode === "link") {
+    const made = (await context.ui.withinProgressDialog(
+      linkPhaseLabel(workTitle),
+      { progress: 40 },
+      async () =>
+        run((c) =>
+          createWorkLink(
+            { client: c },
+            {
+              workId,
+              workTitle,
+              note: ans.note?.trim() || undefined,
+              allowDownload: ans.allowDownload !== false,
+              includedFileIds,
+            },
+          ),
+        ),
+    )) as Awaited<ReturnType<typeof createWorkLink>>;
+    if (made.state === "made") {
+      await showLink(context, "pica — link made", LINK_MADE_BODY, made.shareUrl);
+    } else {
+      await showError(context, `couldn't make the link: ${made.message}`);
+    }
+    return;
+  }
+
+  const email = recipientEmail(ans.email ?? "");
   if (!isDeliverableEmail(email)) {
     if (email) await showError(context, `"${email}" doesn't look like an email address. nothing was sent.`);
     return;

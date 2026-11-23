@@ -10,6 +10,7 @@ import {
   titlePromptHtml,
   deliverHtml,
   deliverConfirmHtml,
+  LINK_MADE_BODY,
   stemsReportHtml,
   shareStemsHtml,
   destinationRow,
@@ -234,7 +235,7 @@ describe("rename: deliverHtml is now 'share'", () => {
   it("renders share title, body, and button", () => {
     const html = deliverHtml("Wave");
     expect(html).toContain('pica / share "Wave"');
-    expect(html).toContain("share this work with someone by email");
+    expect(html).toContain("share this work: email it to someone, or make a link to pass on.");
     expect(html).toContain(">share</button>");
     expect(html).not.toContain("pica — deliver");
   });
@@ -476,5 +477,40 @@ describe("disconnectConfirmHtml", () => {
     const bare = disconnectConfirmHtml("writing into soundslikefez", null);
     expect(bare).toContain("stays valid");
     expect(bare).not.toContain("starting");
+  });
+});
+
+describe("deliverHtml: known contacts and a plain link", () => {
+  it("suggests the catalogue's contacts, filling the email, escaped", () => {
+    const html = deliverHtml("Wave", undefined, [
+      { name: 'Sarah "S" Holt', email: "sarah@band.com" },
+      { name: "Tom", email: "tom@band.com" },
+    ]);
+    expect(html).toContain('list="contacts"');
+    expect(html).toContain('<option value="Sarah &quot;S&quot; Holt &lt;sarah@band.com&gt;"></option>');
+    expect(html).toContain('<option value="Tom &lt;tom@band.com&gt;"></option>');
+  });
+
+  it("is a plain email field when there are no contacts", () => {
+    const html = deliverHtml("Wave");
+    expect(html).not.toContain("<datalist");
+    expect(html).not.toContain('list="contacts"');
+    expect(html).toContain('placeholder="email address"');
+  });
+
+  it("offers a link that emails nobody, bridging mode 'link' without an address", () => {
+    const html = deliverHtml("Wave");
+    expect(html).toContain(">just make a link</button>");
+    expect(html).toContain("mode:'link'");
+    const at = html.indexOf("mode:'link'");
+    const linkPayload = html.slice(at, html.indexOf("})", at));
+    expect(linkPayload).toContain("allowDownload");
+    expect(linkPayload).not.toContain("getElementById('e')");
+  });
+
+  it("the link panel says no one was emailed and where to turn it off", () => {
+    expect(LINK_MADE_BODY).toContain("no one was emailed");
+    expect(LINK_MADE_BODY).toContain("turn off");
+    expect(LINK_MADE_BODY).toContain("under sharing");
   });
 });
