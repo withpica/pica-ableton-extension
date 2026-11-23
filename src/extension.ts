@@ -84,7 +84,7 @@ import {
   titlePromptHtml,
   personPickHtml,
   deliverHtml,
-  linkMadeBody,
+  LINK_MADE_BODY,
   songSearchHtml,
   songPickHtml,
   importRecordingHtml,
@@ -915,7 +915,7 @@ async function runDeliver(
         ),
     )) as Awaited<ReturnType<typeof createWorkLink>>;
     if (made.state === "made") {
-      await showLink(context, "pica — link made", linkMadeBody(made.noteSaved), made.shareUrl);
+      await showLink(context, "pica — link made", LINK_MADE_BODY, made.shareUrl);
     } else {
       if (made.detail) console.error("[pica] link not made:", made.code ?? "", made.detail);
       await showError(context, `couldn't make the link: ${made.message}`);

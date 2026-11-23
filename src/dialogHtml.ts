@@ -325,15 +325,6 @@ export const LINK_MADE_BODY =
   "no one was emailed. anyone with this link can open it for 30 days. " +
   "to turn it off sooner, open the song in pica and press turn off on the link, under sharing.";
 
-/** Added to LINK_MADE_BODY when a typed note could not be put on the link. */
-export const LINK_NOTE_NOT_ADDED =
-  "your note wasn't added to the link, so its page won't show it. send the note to them yourself with the link.";
-
-/** The link-made panel's text; noteSaved false = a typed note didn't go on. */
-export function linkMadeBody(noteSaved?: boolean): string {
-  return noteSaved === false ? `${LINK_MADE_BODY} ${LINK_NOTE_NOT_ADDED}` : LINK_MADE_BODY;
-}
-
 /** Stem picker: one include/skip row per stem, before the deliver dialog.
  *  Bridges {ids: string[]} (the chosen stem ids) or {cancelled:true}. */
 export function shareStemsHtml(stems: StemChoice[]): string {
@@ -441,7 +432,9 @@ function ownershipLine(status?: MasterOwnershipOutcome["status"]): string | null
     case "created":
       // The share register writes has no owner (recording_splits holds only
       // a person), so the recording page shows "unknown" (68, 2026-11-23).
-      return "master ownership: who owns this master isn't set yet. on the recording page in pica, end the share with no owner, then add the owner.";
+      // Since pica#4041 (V8) the owner is picked on that share in one step.
+      // Words by e1, matching the MCP reply (mcp-server/src/tools/register.ts).
+      return "master ownership: who owns the master isn't set yet: choose the owner on the recording page.";
     case "skipped_existing":
       return "master ownership: already set.";
     case "failed":

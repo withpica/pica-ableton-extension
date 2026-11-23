@@ -152,25 +152,31 @@ describe("createWorkLink (a link, no email)", () => {
     expect(args).not.toHaveProperty("sent_to_emails");
   });
 
-  // Founder smoke 2026-11-23: the create route refuses personal_message
-  // ("unknown field"), so the note goes on with pica_share_links_update.
-  it("adds a typed note with an update after the link is made, never on create", async () => {
-    const client = fakeClient((name: string) =>
-      name === "pica_share_links_create" ? { id: "l1", share_url: "https://withpica.com/share/abc" } : { id: "l1" },
-    );
+  // pica#4040 (V8): the create route takes personal_message, so a typed note
+  // goes on in the one create call; there is no follow-up update.
+  it("puts a typed note on the link in the one create call", async () => {
+    const client = fakeClient(() => ({ id: "l1", share_url: "https://withpica.com/share/abc" }));
     const r = await createWorkLink({ client }, { ...linkBase, note: "  rough mix  " });
-    expect(r).toEqual({ state: "made", shareUrl: "https://withpica.com/share/abc", linkId: "l1", noteSaved: true });
-    expect(client.callTool.mock.calls[0]![1]).not.toHaveProperty("personal_message");
-    expect(client.callTool.mock.calls[1]).toEqual(["pica_share_links_update", { id: "l1", personal_message: "rough mix" }]);
+    expect(r).toEqual({ state: "made", shareUrl: "https://withpica.com/share/abc", linkId: "l1" });
+    expect(client.callTool).toHaveBeenCalledTimes(1);
+    expect(client.callTool.mock.calls[0]![0]).toBe("pica_share_links_create");
+    expect(client.callTool.mock.calls[0]![1]).toMatchObject({ personal_message: "rough mix" });
   });
 
-  it("still reports the link when the note can't be added", async () => {
-    const client = fakeClient((name: string) => {
-      if (name === "pica_share_links_create") return { id: "l1", share_url: "https://withpica.com/share/abc" };
+  it("sends no personal_message when no note was typed", async () => {
+    const client = fakeClient(() => ({ id: "l1", share_url: "https://withpica.com/share/abc" }));
+    await createWorkLink({ client }, { ...linkBase, note: "   " });
+    expect(client.callTool).toHaveBeenCalledTimes(1);
+    expect(client.callTool.mock.calls[0]![1]).not.toHaveProperty("personal_message");
+  });
+
+  it("a refused create with a note is a failed link, with no second call", async () => {
+    const client = fakeClient(() => {
       throw new PicaMcpError("PICA returned HTTP 500", "500");
     });
     const r = await createWorkLink({ client }, { ...linkBase, note: "rough mix" });
-    expect(r).toMatchObject({ state: "made", noteSaved: false });
+    expect(r).toMatchObject({ state: "error" });
+    expect(client.callTool).toHaveBeenCalledTimes(1);
   });
 
   it("carries the chosen stems and download off", async () => {
