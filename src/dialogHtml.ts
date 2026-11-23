@@ -439,7 +439,9 @@ function leadLine(action: RegisterReport["action"], title: string): string {
 function ownershipLine(status?: MasterOwnershipOutcome["status"]): string | null {
   switch (status) {
     case "created":
-      return "master ownership: your org now owns 100% of this master. refine splits in PICA.";
+      // The share register writes has no owner (recording_splits holds only
+      // a person), so the recording page shows "unknown" (68, 2026-11-23).
+      return "master ownership: who owns this master isn't set yet. on the recording page in pica, end the share with no owner, then add the owner.";
     case "skipped_existing":
       return "master ownership: already set.";
     case "failed":

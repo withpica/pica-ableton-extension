@@ -87,7 +87,10 @@ describe("finalReportHtml", () => {
   });
 
   it("renders ownership lines and omits when undefined", () => {
-    expect(finalReportHtml({ ...base, masterOwnership: "created" })).toContain("your org now owns 100%");
+    // The share has no owner yet, so the line never claims one (e1/68, 2026-11-23).
+    expect(finalReportHtml({ ...base, masterOwnership: "created" })).toContain("who owns this master isn't set yet");
+    expect(finalReportHtml({ ...base, masterOwnership: "created" })).not.toContain("owns 100%");
+    expect(finalReportHtml({ ...base, masterOwnership: "created" })).toContain("end the share with no owner, then add the owner");
     expect(finalReportHtml({ ...base, masterOwnership: "skipped_existing" })).toContain("already set.");
     expect(finalReportHtml({ ...base, masterOwnership: "failed" })).toContain("could not be saved automatically");
     expect(finalReportHtml(base)).not.toContain("master ownership");

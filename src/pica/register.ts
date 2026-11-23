@@ -99,8 +99,8 @@ function existingWorkIdFromError(e: PicaMcpError): string | undefined {
 
 /**
  * Register the captured Set in ONE round-trip via pica_register_set: the server
- * creates the work (with snapshot), the linked master recording, and 100% org
- * master ownership in a single in-process operation. This replaces the five
+ * creates the work (with snapshot), the linked master recording, and a 100%
+ * master split with no owner yet in a single in-process operation. This replaces the five
  * sequential calls the extension used to make (works_query dup-check →
  * works_create → recordings_create → splits_list → splits_create) — the bulk of
  * the "Registering…" latency was those serialized internet round-trips.

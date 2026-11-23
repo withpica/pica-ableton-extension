@@ -15,7 +15,7 @@ function fakeClient() {
 }
 
 describe("masterSplitPayload", () => {
-  it("is exactly an org-owned 100% master split (no person_id)", () => {
+  it("is exactly a 100% master split with no owner (no person_id)", () => {
     expect(masterSplitPayload("r1")).toEqual({
       recording_id: "r1",
       split_type: "master",

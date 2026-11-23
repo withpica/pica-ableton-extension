@@ -8,11 +8,12 @@ export interface MasterOwnershipOutcome {
 }
 
 /**
- * The single org-owned master split written for a DAW-registered recording.
- * person_id is omitted on purpose: recording_splits.person_id is optional and
- * the route sets organisation_id server-side from the connection key, so the
- * registering org owns 100% of the master. Refined to per-person/co-ownership
- * later in /inspect. Canonical home = recording_splits (NOT the
+ * The single 100% master split written for a DAW-registered recording.
+ * person_id is omitted: recording_splits can name only a person as the owner,
+ * so the row has no owner (the recording page shows "unknown") until one is
+ * chosen in /inspect (68, 2026-11-23). organisation_id is set server-side
+ * from the connection key and scopes the row; it does not make the org the
+ * owner. Canonical home = recording_splits (NOT the
  * recordings.ownership_percentage shadow column).
  */
 export function masterSplitPayload(recordingId: string): Record<string, unknown> {
@@ -40,7 +41,7 @@ export function asSplitArray(result: unknown): Array<{ split_type?: string }> {
 
 /**
  * Insert-once master ownership: skip if a master split already exists on the
- * recording; otherwise create one org-owned 100% master split. Best-effort — a
+ * recording; otherwise create one 100% master split with no owner yet. Best-effort — a
  * non-auth failure is reported, not thrown (the registration already succeeded;
  * we must not lose it). A 401 propagates so the reconnect path can mint a fresh
  * key and re-run (the skip-existing check makes re-run safe — no double row).

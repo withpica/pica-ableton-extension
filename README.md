@@ -122,9 +122,10 @@ and your **catalog**. The old per-step success popups are gone.
 catalog, you can either add credits to the existing recording or **register the
 Set as a new version** (a new recording under the same work) — pick the version
 type (alternate, remix, acoustic, live, cover, alternate master, demo). Any
-recording the extension *mints* (a fresh master, or a new version) is claimed
-as 100% org master ownership by default — a starting position you refine or
-reassign in `/inspect`; adding credits to a pre-existing recording claims nothing.
+recording the extension *mints* (a fresh master, or a new version) gets a 100%
+master share with no owner set yet: on the recording page in PICA, end the
+share with no owner, then add the owner. Adding credits to a pre-existing
+recording writes no share.
 
 **Credits checklist.** After register (or when re-running on an already-registered
 Set) a checklist opens: one row per performed part, instrument pre-filled from the
@@ -198,7 +199,7 @@ whatever audio is on the work at the time.
 ## How it works
 
 - Reads the **whole Set** via `context.application.song` — independent of which track you right-clicked (the SDK has no global/Set menu scope, so the action is offered on tracks).
-- Writes over PICA's **MCP JSON-RPC endpoint** (`/api/mcp`): declares identity (`pica_introduce_self`), then `pica_register_set` — a single call that creates the work (with the session snapshot in `metadata`), its master recording, and the 100% org-owned master ownership split in one round-trip (collapsing what used to be `pica_works_create` + `pica_recordings_create` + `pica_recording_splits_create`). The capture steps follow, each in a single batched call — `pica_recording_credits_update` (one call per performer, all at once, so each instrument saves and each performer reports saved or failed on its own), `pica_work_writers_add` (all writers), and `pica_recording_samples_add` (Splice). Stems render via the SDK's `renderPreFxAudio` and upload direct-to-storage (`pica_audio_presigned_upload` → HTTP PUT → `pica_audio_complete_upload` → `pica_audio_analyze`). This instrumented path makes the new work appear **live in PICA's `/inspect` activity rail**.
+- Writes over PICA's **MCP JSON-RPC endpoint** (`/api/mcp`): declares identity (`pica_introduce_self`), then `pica_register_set` — a single call that creates the work (with the session snapshot in `metadata`), its master recording, and a 100% master split (no owner set yet) in one round-trip (collapsing what used to be `pica_works_create` + `pica_recordings_create` + `pica_recording_splits_create`). The capture steps follow, each in a single batched call — `pica_recording_credits_update` (one call per performer, all at once, so each instrument saves and each performer reports saved or failed on its own), `pica_work_writers_add` (all writers), and `pica_recording_samples_add` (Splice). Stems render via the SDK's `renderPreFxAudio` and upload direct-to-storage (`pica_audio_presigned_upload` → HTTP PUT → `pica_audio_complete_upload` → `pica_audio_analyze`). This instrumented path makes the new work appear **live in PICA's `/inspect` activity rail**.
 - **Architecture:** a pure, host-independent core (`src/pica/*`, `src/session/snapshot.ts`) unit-tested with Vitest, plus thin Ableton host glue (`src/extension.ts`, `ui/interface.html`). Run `npm test` to exercise the core without Live.
 
 ## License / IP
