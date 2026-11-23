@@ -44,8 +44,21 @@ function dialog(people = PEOPLE) {
 describe("installPeopleSuggest: matching", () => {
   const { match } = installPeopleSuggest(new JSDOM("<body></body>").window.document, PEOPLE);
 
-  it("suggests names that start with what was typed, first", () => {
-    expect(match("jo").map((m) => m.name)).toEqual(["Joseph Oyelade", "Jo Bloggs"]);
+  it("suggests names that start with what was typed, first, the shorter (closer) one ahead", () => {
+    expect(match("jo").map((m) => m.name)).toEqual(["Jo Bloggs", "Joseph Oyelade"]);
+  });
+
+  // Founder smoke 2026-11-23: "Féz" did not come up for "F" or "Fe".
+  it("folds accents both ways, and puts a prefix match ahead of a match inside a name", () => {
+    const m = installPeopleSuggest(new JSDOM("").window.document, [
+      { name: "Alfie Fenwick", stageNames: [] },
+      { name: "Féz", stageNames: [] },
+      { name: "Felicity Farrow-Jones", stageNames: [] },
+    ]).match;
+    expect(m("fe")[0]!.name).toBe("Féz");
+    expect(m("f")[0]!.name).toBe("Féz");
+    expect(m("fez").map((x) => x.name)).toEqual(["Féz"]);
+    expect(m("FÉZ").map((x) => x.name)).toEqual(["Féz"]);
   });
 
   it("matches a later word in the name, and a stage name", () => {
@@ -76,10 +89,10 @@ describe("the injected script in a dialog", () => {
   it("enter picks the highlighted suggestion; arrows move the highlight", () => {
     const d = dialog();
     d.type("jo");
-    expect(d.shown()).toEqual(["Joseph Oyelade · Kehinde", "Jo Bloggs"]);
+    expect(d.shown()).toEqual(["Jo Bloggs", "Joseph Oyelade · Kehinde"]);
     d.key("ArrowDown");
     d.key("Enter");
-    expect(d.who.value).toBe("Jo Bloggs");
+    expect(d.who.value).toBe("Joseph Oyelade");
     expect(d.visible()).toBe(false);
   });
 

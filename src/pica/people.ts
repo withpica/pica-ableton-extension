@@ -13,13 +13,23 @@ function norm(s: string): string {
   return s.trim().toLowerCase();
 }
 
-/** Shape a pica_people_query result (envelope-tolerant) into candidates. */
-export function toPersonCandidates(raw: unknown): PersonCandidate[] {
+/** pica_people_query's limit maximum is 500 (mcp-server/src/tools/people.ts). */
+const PEOPLE_PAGE = 500;
+/** A safety cap on what one dialog loads; a catalogue past it loses the rest. */
+const PEOPLE_CAP = 5000;
+
+/** The rows of a pica_people_query result, whatever its envelope. */
+function rowsOfPeople(raw: unknown): unknown[] {
   const obj = raw as { people?: unknown; items?: unknown; data?: unknown } | null;
   const list = Array.isArray(raw)
     ? raw
     : (obj?.people ?? obj?.items ?? (obj?.data as { people?: unknown })?.people ?? []);
-  if (!Array.isArray(list)) return [];
+  return Array.isArray(list) ? list : [];
+}
+
+/** Shape a pica_people_query result (envelope-tolerant) into candidates. */
+export function toPersonCandidates(raw: unknown): PersonCandidate[] {
+  const list = rowsOfPeople(raw);
   const out: PersonCandidate[] = [];
   const seen = new Set<string>();
   for (const p of list as Array<Record<string, unknown>>) {
@@ -72,14 +82,13 @@ export function resolvePersonId(name: string, candidates: PersonCandidate[]): st
  * is hit).
  */
 export async function fetchPeopleCandidates(client: PicaMcpClient): Promise<PersonCandidate[]> {
-  const PAGE = 200;
-  const CAP = 2000;
   const all: PersonCandidate[] = [];
-  for (let offset = 0; offset < CAP; offset += PAGE) {
-    const raw = await client.callTool("pica_people_query", { limit: PAGE, offset });
-    const page = toPersonCandidates(raw);
-    all.push(...page);
-    if (page.length < PAGE) break;
+  for (let offset = 0; offset < PEOPLE_CAP; offset += PEOPLE_PAGE) {
+    const raw = await client.callTool("pica_people_query", { limit: PEOPLE_PAGE, offset });
+    all.push(...toPersonCandidates(raw));
+    // Count the rows PICA sent, not the ones kept: a dropped row (no name)
+    // made a full page look short and stopped the paging early.
+    if (rowsOfPeople(raw).length < PEOPLE_PAGE) break;
   }
   const seen = new Set<string>();
   return all.filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
@@ -124,17 +133,12 @@ export function toEmailContacts(raw: unknown): EmailContact[] {
  * back to a plain email field. Paginated with the same cap as the typeahead.
  */
 export async function fetchEmailContacts(client: PicaMcpClient): Promise<EmailContact[]> {
-  const PAGE = 200;
-  const CAP = 2000;
   const all: EmailContact[] = [];
-  for (let offset = 0; offset < CAP; offset += PAGE) {
-    const raw = await client.callTool("pica_people_query", { has_email: true, limit: PAGE, offset });
-    const obj = raw as { people?: unknown; items?: unknown; data?: unknown } | null;
-    const rows = Array.isArray(raw)
-      ? raw
-      : (obj?.people ?? obj?.items ?? (obj?.data as { people?: unknown })?.people ?? []);
+  for (let offset = 0; offset < PEOPLE_CAP; offset += PEOPLE_PAGE) {
+    const raw = await client.callTool("pica_people_query", { has_email: true, limit: PEOPLE_PAGE, offset });
+    const rows = rowsOfPeople(raw);
     all.push(...toEmailContacts(rows));
-    if (!Array.isArray(rows) || rows.length < PAGE) break;
+    if (rows.length < PEOPLE_PAGE) break;
   }
   const seen = new Set<string>();
   return all.filter((c) => {

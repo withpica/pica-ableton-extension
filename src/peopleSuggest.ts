@@ -38,16 +38,18 @@ export function installPeopleSuggest(
     return p && typeof p.name === "string" && p.name.trim();
   });
 
+  // Accents fold on both sides, so "fe" finds "Féz" and "fez" does too.
   function norm(s: string): string {
-    return String(s || "").trim().toLowerCase();
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
   }
 
   // Rank: name starts with the query, a word in the name does, a stage name
-  // does, then the query anywhere. Ties keep catalogue order.
+  // does, then the query anywhere. Within a rank the shorter name comes
+  // first (the closer match), then catalogue order.
   function match(q: string): Array<{ name: string; label: string }> {
     var query = norm(q);
     if (!query) return [];
-    var scored: Array<{ s: number; i: number; name: string; label: string }> = [];
+    var scored: Array<{ s: number; n: number; i: number; name: string; label: string }> = [];
     for (var i = 0; i < list.length; i++) {
       var p = list[i]!;
       var name = norm(p.name);
@@ -58,15 +60,18 @@ export function installPeopleSuggest(
       else if (stages.some(function (st) { return st.indexOf(query) === 0; })) s = 2;
       else if (name.indexOf(query) >= 0 || stages.some(function (st) { return st.indexOf(query) >= 0; })) s = 3;
       if (s < 0) continue;
-      var alias = (p.stageNames || []).filter(function (st) { return st && norm(st) !== name; });
+      // Shown spellings compare without folding, so "Féz" still shows beside "Fez".
+      var plain = p.name.trim().toLowerCase();
+      var alias = (p.stageNames || []).filter(function (st) { return st && st.trim().toLowerCase() !== plain; });
       scored.push({
         s: s,
+        n: name.length,
         i: i,
         name: p.name.trim(),
         label: p.name.trim() + (alias.length ? " · " + alias.join(", ") : ""),
       });
     }
-    scored.sort(function (a, b) { return a.s - b.s || a.i - b.i; });
+    scored.sort(function (a, b) { return a.s - b.s || a.n - b.n || a.i - b.i; });
     return scored.slice(0, MAX).map(function (x) { return { name: x.name, label: x.label }; });
   }
 

@@ -75,17 +75,25 @@ describe("fetchPeopleCandidates", () => {
   }
 
   it("accumulates across full pages and stops on a short page", async () => {
-    const full = Array.from({ length: 200 }, (_, i) => ({ id: `a${i}`, name: `A${i}` }));
+    const full = Array.from({ length: 500 }, (_, i) => ({ id: `a${i}`, name: `A${i}` }));
     const short = [{ id: "z1", name: "Z1" }];
     const out = await fetchPeopleCandidates(pagedClient([full, short]));
-    expect(out).toHaveLength(201);
+    expect(out).toHaveLength(501);
+  });
+
+  // A nameless row is dropped, but the page PICA sent was still full.
+  it("keeps paging past a full page that had a row it couldn't use", async () => {
+    const full = Array.from({ length: 500 }, (_, i) => (i === 0 ? { id: "x", name: "" } : { id: `a${i}`, name: `A${i}` }));
+    const short = [{ id: "z1", name: "Féz" }];
+    const out = await fetchPeopleCandidates(pagedClient([full, short]));
+    expect(out.map((c) => c.name)).toContain("Féz");
   });
 
   it("dedupes ids across pages", async () => {
-    const p1 = Array.from({ length: 200 }, (_, i) => ({ id: `a${i}`, name: `A${i}` }));
+    const p1 = Array.from({ length: 500 }, (_, i) => ({ id: `a${i}`, name: `A${i}` }));
     const p2 = [{ id: "a0", name: "A0 again" }, { id: "new", name: "New" }]; // a0 repeats
     const out = await fetchPeopleCandidates(pagedClient([p1, p2]));
-    expect(out).toHaveLength(201); // 200 + 1 new, a0 deduped
+    expect(out).toHaveLength(501); // 500 + 1 new, a0 deduped
     expect(out.filter((c) => c.id === "a0")).toHaveLength(1);
   });
 });
@@ -126,14 +134,14 @@ describe("fetchEmailContacts", () => {
     const client = {
       callTool: async (name: string, args: any) => {
         calls.push({ name, args });
-        return { people: args.offset === 0 ? page(200, 0) : page(3, 200) };
+        return { people: args.offset === 0 ? page(500, 0) : page(3, 500) };
       },
     } as any;
     const contacts = await fetchEmailContacts(client);
-    expect(contacts).toHaveLength(203);
+    expect(contacts).toHaveLength(503);
     expect(calls).toEqual([
-      { name: "pica_people_query", args: { has_email: true, limit: 200, offset: 0 } },
-      { name: "pica_people_query", args: { has_email: true, limit: 200, offset: 200 } },
+      { name: "pica_people_query", args: { has_email: true, limit: 500, offset: 0 } },
+      { name: "pica_people_query", args: { has_email: true, limit: 500, offset: 500 } },
     ]);
   });
 
