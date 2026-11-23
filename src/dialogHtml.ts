@@ -325,6 +325,10 @@ export const LINK_MADE_BODY =
   "no one was emailed. anyone with this link can open it for 30 days. " +
   "to turn it off sooner, open the song in pica and press turn off on the link, under sharing.";
 
+/** Added to LINK_MADE_BODY when a typed note could not be put on the link. */
+export const LINK_NOTE_NOT_ADDED =
+  "your note wasn't added to the link. you can add it on the song in pica, under sharing.";
+
 /** Stem picker: one include/skip row per stem, before the deliver dialog.
  *  Bridges {ids: string[]} (the chosen stem ids) or {cancelled:true}. */
 export function shareStemsHtml(stems: StemChoice[]): string {
@@ -500,8 +504,11 @@ export function finalReportHtml(report: RegisterReport): string {
     );
   }
   const links =
-    reportLinkRow("view the work", `${BASE_URL}/inspect/works/${report.workId}`, 0) +
-    reportLinkRow("view the recording (upload your master here)", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
+    // The master is uploaded from the song page's audio step, which files it
+    // as the master of the song's recording; the recording page showed no
+    // upload for it (founder smoke 2026-11-23).
+    reportLinkRow("view the work (upload your master in its audio step)", `${BASE_URL}/inspect/works/${report.workId}`, 0) +
+    reportLinkRow("view the recording", `${BASE_URL}/inspect/recordings/${report.recordingId}`, 1) +
     reportLinkRow("open your catalog", `${BASE_URL}/inspect`, 2);
   return withFlatStyle(
     `<div class="h">pica / registered</div>` +
@@ -520,20 +527,47 @@ export function finalReportHtml(report: RegisterReport): string {
 // Import from PICA (ADR-259)
 // ---------------------------------------------------------------------------
 
-/** Which song: one field with the catalogue's works suggested.
- *  Bridges {value} or {cancelled:true}. */
-export function importSongHtml(labels: readonly string[]): string {
+/**
+ * Which song: a plain field, nothing suggested until PICA is searched with
+ * what was typed. `notice` says why it is asked again (no match). Shared by
+ * import and share. Bridges {value} or {cancelled:true}.
+ */
+export function songSearchHtml(heading: string, hint: string, notice = "", value = ""): string {
   const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
-  const nextJs = bridgeSend("JSON.stringify({value:document.getElementById('w').value.trim()})");
-  const options = labels.map((l) => `<option value="${escapeHtml(l)}"></option>`).join("");
+  const findJs = bridgeSend("JSON.stringify({value:document.getElementById('w').value.trim()})");
   return withFlatStyle(
-    `<div class="h">pica / import a song</div>` +
-    `<div class="hint">bring a song's stems from your pica catalogue into this set. nothing in pica changes.</div>` +
+    `<div class="h">${escapeHtml(heading)}</div>` +
+    `<div class="hint">${escapeHtml(hint)}</div>` +
+    (notice ? `<div class="hint">${escapeHtml(notice)}</div>` : "") +
     `<div class="label">song</div>` +
-    `<input class="input" id="w" list="works" autocomplete="off" placeholder="start typing a song title">` +
-    `<datalist id="works">${options}</datalist>` +
+    `<input class="input" id="w" autocomplete="off" value="${escapeHtml(value)}" placeholder="part of the title, or the artist">` +
     `<div class="divider"></div>` +
     `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button class="btn-primary" onclick="${escapeHtml(findJs)}">find</button></div>`,
+  );
+}
+
+/** The songs a search found, the first chosen. Bridges {id}, {again:true} or {cancelled:true}. */
+export function songPickHtml(heading: string, query: string, labels: ReadonlyArray<{ id: string; label: string }>): string {
+  const cancelJs = bridgeSend("JSON.stringify({cancelled:true})");
+  const againJs = bridgeSend("JSON.stringify({again:true})");
+  const nextJs = bridgeSend(
+    "JSON.stringify({id:(document.querySelector('input[name=s]:checked')||{}).value||''})",
+  );
+  const rows = labels
+    .map(
+      (w, i) =>
+        `<label class="check"><input type="radio" name="s" value="${escapeHtml(w.id)}"${i === 0 ? " checked" : ""}> ` +
+        `${escapeHtml(w.label)}</label>`,
+    )
+    .join("");
+  return withFlatStyle(
+    `<div class="h">${escapeHtml(heading)}</div>` +
+    `<div class="hint">songs in your catalogue matching "${escapeHtml(query)}":</div>` +
+    rows +
+    `<div class="divider"></div>` +
+    `<div class="actions"><button onclick="${escapeHtml(cancelJs)}">cancel</button> ` +
+    `<button onclick="${escapeHtml(againJs)}">search again</button> ` +
     `<button class="btn-primary" onclick="${escapeHtml(nextJs)}">next</button></div>`,
   );
 }

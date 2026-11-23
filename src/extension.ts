@@ -16,9 +16,9 @@ import { readFile } from "node:fs/promises";
 import { PicaMcpClient } from "./pica/mcpClient";
 import {
   readOnly,
-  fetchWorkChoices,
+  searchWorks,
   workLabel,
-  workForPick,
+  type WorkChoice,
   toRecordingChoices,
   toImportFiles,
   filesForRecording,
@@ -82,7 +82,9 @@ import {
   titlePromptHtml,
   deliverHtml,
   LINK_MADE_BODY,
-  importSongHtml,
+  LINK_NOTE_NOT_ADDED,
+  songSearchHtml,
+  songPickHtml,
   importRecordingHtml,
   importFilesHtml,
   importTempoHtml,
@@ -595,7 +597,8 @@ async function runSendStems(
     return;
   }
   const targets = deriveRenderTargets(audioTracks);
-  const masterUrl = `${BASE_URL}/inspect/recordings/${recordingId}`;
+  // The song page's audio step uploads the master (see finalReportHtml).
+  const masterUrl = `${BASE_URL}/inspect/works/${workId}`;
 
   const locators = locatorOptions(
     ((song as unknown as { cuePoints?: CueLike[] }).cuePoints ?? []) as CueLike[],
@@ -891,8 +894,10 @@ async function runDeliver(
         ),
     )) as Awaited<ReturnType<typeof createWorkLink>>;
     if (made.state === "made") {
-      await showLink(context, "pica — link made", LINK_MADE_BODY, made.shareUrl);
+      const body = made.noteSaved === false ? `${LINK_MADE_BODY} ${LINK_NOTE_NOT_ADDED}` : LINK_MADE_BODY;
+      await showLink(context, "pica — link made", body, made.shareUrl);
     } else {
+      if (made.detail) console.error("[pica] link not made:", made.code ?? "", made.detail);
       await showError(context, `couldn't make the link: ${made.message}`);
     }
     return;
@@ -940,7 +945,7 @@ async function runDeliver(
     await showLink(
       context,
       "pica — shared",
-      `emailed ${result.displayName ?? email} (${result.classification}).`,
+      `emailed ${result.displayName ?? email}.`,
       result.shareUrl || `${BASE_URL}/inspect/works/${workId}`,
     );
   } else if (result.state === "error") {
@@ -973,28 +978,25 @@ async function runDeliverStandalone(context: ExtensionContext<"1.0.0">, hostApiV
     );
   const liveVersion = hostApiVersion ? `(api ${hostApiVersion})` : "";
 
-  const titleRaw = await context.ui.showModalDialog(
-    `data:text/html,${encodeURIComponent(titlePromptHtml("type the title of the work you want to share:"))}`,
-    TITLE_W,
-    TITLE_H,
+  // Which work: searched in PICA by what was typed, as import does. It was
+  // an exact-title lookup, so "Jed" or "Ableton" found nothing (founder
+  // smoke 2026-11-23).
+  const work = await pickSong(
+    context,
+    (text) =>
+      runWithClient(async (c) => {
+        await ensureIntroduced(c, liveVersion);
+        return searchWorks(readOnly(c), text);
+      }),
+    "pica / share a song",
+    "type part of the song's title, or the artist.",
   );
-  const parsed = safeParse(titleRaw) as { title?: string; cancelled?: boolean };
-  const title = parsed.title?.trim();
-  if (parsed.cancelled || !title) return;
-
-  const found = await runWithClient(async (c) => {
-    await ensureIntroduced(c, liveVersion);
-    return findExistingRegistration(c, title);
-  });
-  if (!found?.workId) {
-    await showError(context, `no registered work titled "${title}" found. register it in PICA first, then deliver.`);
-    return;
-  }
+  if (!work) return;
   await runDeliver(
     context,
     runWithClient,
-    found.workId,
-    title,
+    work.id,
+    work.title,
     await describeConnection(storageDir, currentKey),
   );
 }
@@ -1143,10 +1145,58 @@ async function runReportFollowOn(
 }
 
 const IMPORT_W = 480;
-const IMPORT_SONG_H = 300;
+const SONG_SEARCH_H = 300;
+const SONG_PICK_H = 460;
 const IMPORT_FILES_H = 520;
 const IMPORT_TEMPO_H = 360;
 const IMPORT_REPORT_H = 460;
+
+/**
+ * Ask for part of a song's title, search the catalogue in PICA, and pick one
+ * of the matches (straight through when there is exactly one). Nothing is
+ * suggested before anything is typed. Shared by import and share.
+ */
+async function pickSong(
+  context: ExtensionContext<"1.0.0">,
+  search: (text: string) => Promise<WorkChoice[]>,
+  heading: string,
+  hint: string,
+): Promise<WorkChoice | undefined> {
+  let notice = "";
+  let typed = "";
+  for (;;) {
+    const ask = safeParse(
+      await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(songSearchHtml(heading, hint, notice, typed))}`,
+        IMPORT_W,
+        SONG_SEARCH_H,
+      ),
+    ) as { cancelled?: boolean; value?: string };
+    typed = ask.value?.trim() ?? "";
+    if (ask.cancelled || !typed) return undefined;
+    const found = await search(typed);
+    if (found.length === 0) {
+      notice = `nothing in your catalogue matches "${typed}". try fewer letters, or the artist.`;
+      continue;
+    }
+    if (found.length === 1) return found[0];
+    const pick = safeParse(
+      await context.ui.showModalDialog(
+        `data:text/html,${encodeURIComponent(
+          songPickHtml(heading, typed, found.map((w) => ({ id: w.id, label: workLabel(w) }))),
+        )}`,
+        IMPORT_W,
+        SONG_PICK_H,
+      ),
+    ) as { cancelled?: boolean; again?: boolean; id?: string };
+    if (pick.cancelled) return undefined;
+    if (pick.again) {
+      notice = "";
+      continue;
+    }
+    return found.find((w) => w.id === pick.id);
+  }
+}
 
 /**
  * Import from PICA: which song → which recording (only when there is more
@@ -1177,25 +1227,14 @@ async function runImport(context: ExtensionContext<"1.0.0">): Promise<void> {
       },
     );
 
-  // 1. Which song.
-  const works = await read((c) => fetchWorkChoices(c));
-  if (works.length === 0) {
-    await showError(context, "your pica catalogue has no songs yet.");
-    return;
-  }
-  const songAns = safeParse(
-    await context.ui.showModalDialog(
-      `data:text/html,${encodeURIComponent(importSongHtml(works.map(workLabel)))}`,
-      IMPORT_W,
-      IMPORT_SONG_H,
-    ),
-  ) as { cancelled?: boolean; value?: string };
-  if (songAns.cancelled || !songAns.value?.trim()) return;
-  const work = workForPick(songAns.value, works);
-  if (!work) {
-    await showError(context, `no single song in your catalogue matches "${songAns.value.trim()}". pick one from the list.`);
-    return;
-  }
+  // 1. Which song: searched in PICA by what was typed.
+  const work = await pickSong(
+    context,
+    (text) => read((c) => searchWorks(c, text)),
+    "pica / import a song",
+    "bring a song's stems from your pica catalogue into this set. nothing in pica changes.",
+  );
+  if (!work) return;
 
   // 2. Which recording, and its files.
   const [recordings, files, workMeta] = await read(async (c) => {

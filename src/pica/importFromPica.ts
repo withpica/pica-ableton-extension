@@ -83,34 +83,25 @@ export function toWorkChoices(raw: unknown): WorkChoice[] {
   return out;
 }
 
-/** The caller's own works (pica_works_query is scoped to the key's catalogue). */
-export async function fetchWorkChoices(c: ReadOnlyClient): Promise<WorkChoice[]> {
-  const PAGE = 200;
-  const CAP = 2000;
-  const all: WorkChoice[] = [];
-  for (let offset = 0; offset < CAP; offset += PAGE) {
-    const raw = await c.read("pica_works_query", { limit: PAGE, offset });
-    const rows = rowsOf(raw, "works");
-    all.push(...toWorkChoices(rows));
-    if (rows.length < PAGE) break;
-  }
-  const seen = new Set<string>();
-  return all.filter((w) => (seen.has(w.id) ? false : (seen.add(w.id), true)));
+/** How many matches one search shows. */
+export const SEARCH_LIMIT = 25;
+
+/**
+ * The caller's own works whose title, ISWC or artist matches what they typed,
+ * searched by PICA (pica_works_query's `query`; scoped to the key's
+ * catalogue). Replaces loading the whole catalogue into a suggestion list:
+ * its page size (200) was over the tool's maximum (100), so only the first
+ * page ever arrived and a new song was not in it (founder smoke 2026-11-23).
+ */
+export async function searchWorks(c: Pick<ReadOnlyClient, "read">, text: string): Promise<WorkChoice[]> {
+  const query = text.trim();
+  if (!query) return [];
+  return toWorkChoices(await c.read("pica_works_query", { query, limit: SEARCH_LIMIT }));
 }
 
-/** "Title — Artist" for the typeahead; workForPick reads it back. */
+/** "Title — Artist", how a match is shown. */
 export function workLabel(w: WorkChoice): string {
   return w.artist ? `${w.title} — ${w.artist}` : w.title;
-}
-
-/** The work a typed or picked value names: an exact label, else exactly one title match. */
-export function workForPick(value: string, works: WorkChoice[]): WorkChoice | undefined {
-  const v = value.trim().toLowerCase();
-  if (!v) return undefined;
-  const byLabel = works.filter((w) => workLabel(w).toLowerCase() === v);
-  if (byLabel.length === 1) return byLabel[0];
-  const byTitle = works.filter((w) => w.title.toLowerCase() === v);
-  return byTitle.length === 1 ? byTitle[0] : undefined;
 }
 
 export interface RecordingChoice {

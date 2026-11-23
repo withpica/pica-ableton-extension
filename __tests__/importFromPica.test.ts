@@ -7,9 +7,9 @@ import { join } from "node:path";
 import {
   READ_ONLY_TOOLS,
   readOnly,
-  fetchWorkChoices,
+  searchWorks,
+  SEARCH_LIMIT,
   workLabel,
-  workForPick,
   toRecordingChoices,
   toImportFiles,
   filesForRecording,
@@ -69,7 +69,9 @@ describe("read-only on pica", () => {
 });
 
 describe("which song", () => {
-  it("pages the caller's works and labels them title — artist", async () => {
+  // Founder smoke 2026-11-23: a song saved minutes earlier was not in the
+  // list (pages of 200 against a 100 maximum stopped after page one).
+  it("searches PICA with what was typed and labels the matches title — artist", async () => {
     const calls: unknown[] = [];
     const c = {
       read: async (tool: string, args: any) => {
@@ -77,21 +79,16 @@ describe("which song", () => {
         return { items: [{ id: "w1", title: "Wave", primary_artist: "Ivy" }, { id: "w2", title: "Tide" }] };
       },
     } as any;
-    const works = await fetchWorkChoices(c);
-    expect(calls).toEqual([["pica_works_query", { limit: 200, offset: 0 }]]);
+    const works = await searchWorks(c, "  ableton test nov ");
+    expect(calls).toEqual([["pica_works_query", { query: "ableton test nov", limit: SEARCH_LIMIT }]]);
+    expect(SEARCH_LIMIT).toBeLessThanOrEqual(100); // pica_works_query's maximum
     expect(works.map(workLabel)).toEqual(["Wave — Ivy", "Tide"]);
   });
 
-  it("finds the picked song by label, or by a title only one song has", () => {
-    const works = [
-      { id: "w1", title: "Wave", artist: "Ivy" },
-      { id: "w2", title: "Wave", artist: "Sol" },
-      { id: "w3", title: "Tide", artist: "" },
-    ];
-    expect(workForPick("Wave — Sol", works)?.id).toBe("w2");
-    expect(workForPick("tide", works)?.id).toBe("w3");
-    expect(workForPick("Wave", works)).toBeUndefined(); // two songs share it
-    expect(workForPick("", works)).toBeUndefined();
+  it("asks nothing of PICA for an empty search", async () => {
+    const read = vi.fn();
+    expect(await searchWorks({ read } as any, "   ")).toEqual([]);
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("reads recordings by their recording_title", () => {

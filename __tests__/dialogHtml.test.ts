@@ -112,10 +112,13 @@ describe("finalReportHtml", () => {
     expect(finalReportHtml(base)).not.toContain("logged");
   });
 
-  it("renders a log-stems button and labels the recording link for the master upload", () => {
+  it("renders a log-stems button and points the master upload at the song page", () => {
     const html = finalReportHtml({ action: "registered", title: "X", workId: "w1", recordingId: "r1" });
     expect(html).toContain("log stems →");
-    expect(html).toContain("upload your master");
+    expect(html).toContain("upload your master in its audio step");
+    // Founder smoke 2026-11-23: the recording page showed no upload for it.
+    expect(html).toMatch(/inspect\/works\/w1[^<]*<[^]*upload your master|upload your master[^]*inspect\/works\/w1/);
+    expect(html).not.toContain("view the recording (upload");
   });
 });
 
@@ -516,7 +519,8 @@ describe("deliverHtml: known contacts and a plain link", () => {
 });
 
 import {
-  importSongHtml,
+  songSearchHtml,
+  songPickHtml,
   importRecordingHtml,
   importFilesHtml,
   importTempoHtml,
@@ -524,11 +528,25 @@ import {
 } from "../src/dialogHtml";
 
 describe("import dialogs", () => {
-  it("song: suggests the catalogue's songs, escaped", () => {
-    const html = importSongHtml(['Wave "live" — Ivy']);
-    expect(html).toContain('list="works"');
-    expect(html).toContain('<option value="Wave &quot;live&quot; — Ivy"></option>');
+  // Founder smoke 2026-11-23: suggestions showed before anything was typed.
+  it("song search: a plain field, nothing suggested, the notice and the last search kept", () => {
+    const html = songSearchHtml("pica / import a song", "nothing in pica changes.", 'nothing matches "x"', 'Wave "live"');
+    expect(html).not.toContain("list=");
+    expect(html).not.toContain("<datalist");
     expect(html).toContain("nothing in pica changes");
+    expect(html).toContain("nothing matches &quot;x&quot;");
+    expect(html).toContain('value="Wave &quot;live&quot;"');
+  });
+
+  it("song pick: one choice per match, the first chosen, escaped, with search again", () => {
+    const html = songPickHtml("pica / share a song", "wave", [
+      { id: "w1", label: 'Wave "live" — Ivy' },
+      { id: "w2", label: "Wave — Sol" },
+    ]);
+    expect(html).toContain('value="w1" checked');
+    expect(html).not.toContain('value="w2" checked');
+    expect(html).toContain("Wave &quot;live&quot; — Ivy");
+    expect(html).toContain("again:true");
   });
 
   it("recording: one choice per recording, the first chosen", () => {
