@@ -74,18 +74,18 @@ export function candidateNames(candidates: PersonCandidate[]): string[] {
   return out;
 }
 
-/**
- * Resolve a typed performer name to a person id by EXACT (case/space-insensitive)
- * match against any candidate's name or stage names. Returns the id only when
- * EXACTLY ONE candidate matches; undefined for zero or ambiguous (>1) matches —
- * the server then resolves the free-text name (ADR-255).
- */
 /** Whether any candidate has exactly this name or stage name (case and spaces aside). */
 export function hasExactMatch(name: string, candidates: PersonCandidate[]): boolean {
   const q = norm(name);
   return !!q && candidates.some((c) => norm(c.name) === q || c.stageNames.some((s) => norm(s) === q));
 }
 
+/**
+ * Resolve a typed performer name to a person id by EXACT (case/space-insensitive)
+ * match against any candidate's name or stage names. Returns the id only when
+ * EXACTLY ONE candidate matches; undefined for zero or ambiguous (>1) matches —
+ * the server then resolves the free-text name (ADR-255).
+ */
 export function resolvePersonId(name: string, candidates: PersonCandidate[]): string | undefined {
   const q = norm(name);
   if (!q) return undefined;
