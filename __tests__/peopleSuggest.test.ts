@@ -200,3 +200,15 @@ describe("personLabel", () => {
     expect(personLabel(" Sam ", [" ", "sam"])).toBe("Sam");
   });
 });
+
+describe("the dialog's label matches personLabel (e1, 2026-11-25)", () => {
+  it.each([
+    ["Fez", ["Féz", "Fez", "fez", " Feranmi Oguns ", "Feach", "feach"]],
+    ["Joseph Oyelade", ["Kehinde"]],
+    ["Sam", []],
+    ["Ana", ["", "  ", "ANA"]],
+  ])("%s", (name, stageNames) => {
+    const { match } = installPeopleSuggest(new JSDOM("").window.document, [{ name, stageNames }]);
+    expect(match(name)[0]!.label).toBe(personLabel(name, stageNames));
+  });
+});

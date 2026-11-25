@@ -601,7 +601,7 @@ describe("personPickHtml", () => {
   it("chooses the match with the typed name, and offers a new person too", () => {
     const html = personPickHtml("artist", "Fez", [
       { id: "p1", label: "Fezile Dube", same: false },
-      { id: "p2", label: "Féz · SoundsLikeFez", same: true },
+      { id: "p2", label: "Féz (also SoundsLikeFez)", same: true },
     ]);
     expect(html).toContain("pica / which artist?");
     expect(html).toContain('value="p2" checked');

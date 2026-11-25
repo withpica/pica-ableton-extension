@@ -13,7 +13,8 @@ export interface SuggestPerson {
  * that differ from it. "Fez · Féz, Fez, Feranmi Oguns" repeated the name and
  * read as one long name (founder smoke 2026-11-25). Case is ignored when
  * comparing, accents are not, so "Féz" still shows beside "Fez".
- * Copy: e1 (draft until e1 rules).
+ * Copy: e1 (2026-11-25). The dialog's own copy of this rule, inside
+ * installPeopleSuggest, is pinned to it by a test.
  */
 export function personLabel(name: string, stageNames: readonly string[]): string {
   const shown = name.trim();
@@ -94,9 +95,18 @@ export function installPeopleSuggest(
       else if (stages.some(function (st) { return st.indexOf(query) === 0; })) s = 2;
       else if (name.indexOf(query) >= 0 || stages.some(function (st) { return st.indexOf(query) >= 0; })) s = 3;
       if (s < 0) continue;
-      // Shown spellings compare without folding, so "Féz" still shows beside "Fez".
+      // Shown spellings compare without folding, so "Féz" still shows beside
+      // "Fez". The same rule as personLabel (pinned by a test).
       var plain = p.name.trim().toLowerCase();
-      var alias = (p.stageNames || []).filter(function (st) { return st && st.trim().toLowerCase() !== plain; });
+      var seenAlias: Record<string, boolean> = {};
+      seenAlias[plain] = true;
+      var alias: string[] = [];
+      (p.stageNames || []).forEach(function (st) {
+        var t = String(st || "").trim();
+        if (!t || seenAlias[t.toLowerCase()]) return;
+        seenAlias[t.toLowerCase()] = true;
+        alias.push(t);
+      });
       scored.push({
         s: s,
         n: name.length,
@@ -217,10 +227,10 @@ export function installPeopleSuggest(
 
 /**
  * What a person field says when the catalogue's people could not be loaded.
- * Copy: e1 (draft until e1 rules).
+ * Copy: e1 (2026-11-25).
  */
 export const PEOPLE_UNAVAILABLE =
-  "couldn't load the people in your catalogue, so nothing is suggested. type the full name: pica matches it to someone already there when you save.";
+  "couldn't load the people in your catalogue, so there are no suggestions. type their full name: if they're already in pica, it's matched to them when you save.";
 
 /**
  * The script tag that installs the suggestions in a dialog, people inlined.
