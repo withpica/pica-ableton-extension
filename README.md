@@ -123,8 +123,8 @@ catalog, you can either add credits to the existing recording or **register the
 Set as a new version** (a new recording under the same work) — pick the version
 type (alternate, remix, acoustic, live, cover, alternate master, demo). Any
 recording the extension *mints* (a fresh master, or a new version) gets a 100%
-master share with no owner set yet: on the recording page in PICA, end the
-share with no owner, then add the owner. Adding credits to a pre-existing
+master share. Who owns the master isn't set yet: choose the owner on the
+recording page in PICA. Adding credits to a pre-existing
 recording writes no share.
 
 **Credits checklist.** After register (or when re-running on an already-registered

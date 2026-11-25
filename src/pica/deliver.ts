@@ -147,8 +147,6 @@ export type LinkResult =
       state: "made";
       shareUrl: string;
       linkId: string | null;
-      /** Set only when a note was typed: whether it was added to the link. */
-      noteSaved?: boolean;
     }
   | { state: "error"; message: string; code?: string; /** The raw reason, for the console only. */ detail?: string };
 
@@ -167,11 +165,13 @@ export async function createWorkLink(deps: DeliverDeps, args: LinkArgs): Promise
   const now = args.now ?? new Date();
   const expires = new Date(now.getTime() + LINK_DAYS * 24 * 60 * 60 * 1000);
   const picked = args.includedFileIds && args.includedFileIds.length > 0;
+  const note = args.note?.trim();
   const payload: Record<string, unknown> = {
     work_id: args.workId,
     name: args.workTitle.trim() || "shared from Ableton",
-    // No personal_message here: the create route refuses it (it is not in
-    // SHARE_LINK_POST_ALLOWED_FIELDS in PICA), though the update accepts it.
+    // The note, shown on the share page as a quote, goes on in the same call:
+    // PICA's create route takes personal_message since pica#4040 (V8).
+    ...(note ? { personal_message: note } : {}),
     expires_at: expires.toISOString(),
     allow_download: args.allowDownload,
     allow_streaming: true,
@@ -196,21 +196,7 @@ export async function createWorkLink(deps: DeliverDeps, args: LinkArgs): Promise
     return { state: "error", message: "pica didn't send the link back. look under sharing on the song in pica." };
   }
   const linkId = typeof r?.id === "string" ? r.id : null;
-  const note = args.note?.trim();
-  if (!note) return { state: "made", shareUrl, linkId };
-  // The note, shown on the share page as a quote, goes on with an update.
-  // Best-effort: the link already exists, so a failure here is reported
-  // beside it rather than as a failed link.
-  let noteSaved = false;
-  if (linkId) {
-    try {
-      const u: any = await deps.client.callTool("pica_share_links_update", { id: linkId, personal_message: note });
-      noteSaved = !(u && typeof u === "object" && u.error_code);
-    } catch {
-      noteSaved = false;
-    }
-  }
-  return { state: "made", shareUrl, linkId, noteSaved };
+  return { state: "made", shareUrl, linkId };
 }
 
 const LINK_ERROR_FALLBACK = "something went wrong. try again, or make the link on the song in pica.";
