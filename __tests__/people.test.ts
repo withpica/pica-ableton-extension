@@ -63,38 +63,74 @@ describe("resolvePersonId", () => {
 });
 
 describe("fetchPeopleCandidates", () => {
-  function pagedClient(pages: Array<Array<{ id: string; name: string; stage_names?: string[] }>>) {
+  type Row = { id: string; name: string; stage_names?: string[] };
+  /** Pages answered in order; each may say has_more / next_offset, as PICA does. */
+  function pagedClient(pages: Array<{ people: Row[]; has_more?: boolean; next_offset?: number }>) {
+    const calls: Array<Record<string, unknown>> = [];
     let call = 0;
-    return {
-      callTool: async (_name: string, _args: Record<string, unknown>) => {
-        const page = pages[call] ?? [];
-        call++;
-        return { people: page };
+    const client = {
+      callTool: async (_name: string, args: Record<string, unknown>) => {
+        calls.push(args);
+        return pages[call++] ?? { people: [], has_more: false };
       },
     } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
+    return { client, calls };
   }
+  const rows = (n: number, from = 0): Row[] => Array.from({ length: n }, (_, i) => ({ id: `a${from + i}`, name: `A${from + i}` }));
 
-  it("accumulates across full pages and stops on a short page", async () => {
-    const full = Array.from({ length: 500 }, (_, i) => ({ id: `a${i}`, name: `A${i}` }));
-    const short = [{ id: "z1", name: "Z1" }];
-    const out = await fetchPeopleCandidates(pagedClient([full, short]));
-    expect(out).toHaveLength(501);
+  it("follows has_more past a page PICA trimmed short (founder smoke 2026-11-25)", async () => {
+    // PICA trims an answer over 100KB to what fits and says has_more. The old
+    // loop stopped at the first short page and kept only those people.
+    const { client, calls } = pagedClient([
+      { people: rows(60), has_more: true, next_offset: 60 },
+      { people: rows(60, 60), has_more: true, next_offset: 120 },
+      { people: [{ id: "f", name: "Féz" }], has_more: false },
+    ]);
+    const out = await fetchPeopleCandidates(client);
+    expect(out).toHaveLength(121);
+    expect(out.map((c) => c.name)).toContain("Féz");
+    expect(calls.map((c) => c.offset)).toEqual([0, 60, 120]);
   });
 
-  // A nameless row is dropped, but the page PICA sent was still full.
-  it("keeps paging past a full page that had a row it couldn't use", async () => {
-    const full = Array.from({ length: 500 }, (_, i) => (i === 0 ? { id: "x", name: "" } : { id: `a${i}`, name: `A${i}` }));
-    const short = [{ id: "z1", name: "Féz" }];
-    const out = await fetchPeopleCandidates(pagedClient([full, short]));
-    expect(out.map((c) => c.name)).toContain("Féz");
+  it("stops when has_more is false, even on a full page", async () => {
+    const { client, calls } = pagedClient([{ people: rows(100), has_more: false }]);
+    expect(await fetchPeopleCandidates(client)).toHaveLength(100);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps what loaded when a later page fails", async () => {
+    let call = 0;
+    const client = {
+      callTool: async () => {
+        if (call++ === 0) return { people: rows(60), has_more: true, next_offset: 60 };
+        throw new Error("timeout");
+      },
+    } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
+    expect(await fetchPeopleCandidates(client)).toHaveLength(60);
+  });
+
+  it("lets the first page's error through, so the caller can say the people did not load", async () => {
+    const client = { callTool: async () => { throw new Error("401"); } } as unknown as import("../src/pica/mcpClient").PicaMcpClient;
+    await expect(fetchPeopleCandidates(client)).rejects.toThrow("401");
   });
 
   it("dedupes ids across pages", async () => {
-    const p1 = Array.from({ length: 500 }, (_, i) => ({ id: `a${i}`, name: `A${i}` }));
-    const p2 = [{ id: "a0", name: "A0 again" }, { id: "new", name: "New" }]; // a0 repeats
-    const out = await fetchPeopleCandidates(pagedClient([p1, p2]));
-    expect(out).toHaveLength(501); // 500 + 1 new, a0 deduped
+    const { client } = pagedClient([
+      { people: rows(100), has_more: true, next_offset: 100 },
+      { people: [{ id: "a0", name: "A0 again" }, { id: "new", name: "New" }], has_more: false },
+    ]);
+    const out = await fetchPeopleCandidates(client);
+    expect(out).toHaveLength(101);
     expect(out.filter((c) => c.id === "a0")).toHaveLength(1);
+  });
+
+  it("carries no email into what the dialogs receive", async () => {
+    const { client } = pagedClient([
+      { people: [{ id: "1", name: "Sam", email: "sam@example.com" } as Row & { email: string }], has_more: false },
+    ]);
+    const [p] = await fetchPeopleCandidates(client);
+    expect(p).toEqual({ id: "1", name: "Sam", stageNames: [] });
+    expect(JSON.stringify(p)).not.toContain("@");
   });
 });
 
@@ -127,21 +163,24 @@ describe("toEmailContacts", () => {
 });
 
 describe("fetchEmailContacts", () => {
-  it("asks only for people with an email, page by page, until a short page", async () => {
+  it("asks only for people with an email, following has_more past a trimmed page", async () => {
     const calls: any[] = [];
     const page = (n: number, from: number) =>
       Array.from({ length: n }, (_, i) => ({ name: `P${from + i}`, email: `p${from + i}@x.co` }));
     const client = {
       callTool: async (name: string, args: any) => {
         calls.push({ name, args });
-        return { people: args.offset === 0 ? page(500, 0) : page(3, 500) };
+        // PICA trimmed the first page to 40 under its 100KB cap.
+        return args.offset === 0
+          ? { people: page(40, 0), has_more: true, next_offset: 40 }
+          : { people: page(3, 40), has_more: false };
       },
     } as any;
     const contacts = await fetchEmailContacts(client);
-    expect(contacts).toHaveLength(503);
+    expect(contacts).toHaveLength(43);
     expect(calls).toEqual([
-      { name: "pica_people_query", args: { has_email: true, limit: 500, offset: 0 } },
-      { name: "pica_people_query", args: { has_email: true, limit: 500, offset: 500 } },
+      { name: "pica_people_query", args: { has_email: true, limit: 100, offset: 0 } },
+      { name: "pica_people_query", args: { has_email: true, limit: 100, offset: 40 } },
     ]);
   });
 

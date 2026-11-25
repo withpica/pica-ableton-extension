@@ -8,6 +8,27 @@ export interface SuggestPerson {
   stageNames: string[];
 }
 
+/**
+ * How a person reads in a list: the name, then any other names they go by
+ * that differ from it. "Fez · Féz, Fez, Feranmi Oguns" repeated the name and
+ * read as one long name (founder smoke 2026-11-25). Case is ignored when
+ * comparing, accents are not, so "Féz" still shows beside "Fez".
+ * Copy: e1 (draft until e1 rules).
+ */
+export function personLabel(name: string, stageNames: readonly string[]): string {
+  const shown = name.trim();
+  const plain = shown.toLowerCase();
+  const seen = new Set<string>([plain]);
+  const alias: string[] = [];
+  for (const st of stageNames) {
+    const t = st.trim();
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    alias.push(t);
+  }
+  return alias.length ? `${shown} (also ${alias.join(", ")})` : shown;
+}
+
 export function toSuggestPeople(candidates: PersonCandidate[], ownName?: string | null): SuggestPerson[] {
   const out = candidates.map((c) => ({ name: c.name, stageNames: c.stageNames }));
   // The account holder's own name is suggested even with no person on file
@@ -43,6 +64,8 @@ export function toSuggestPeople(candidates: PersonCandidate[], ownName?: string 
 export function installPeopleSuggest(
   doc: Document,
   people: SuggestPerson[],
+  /** Shown under the field, in place of suggestions, when the people did not load. */
+  unavailable?: string,
 ): { match: (q: string) => Array<{ name: string; label: string }> } {
   var MAX = 8;
   var list = (people || []).filter(function (p) {
@@ -79,7 +102,9 @@ export function installPeopleSuggest(
         n: name.length,
         i: i,
         name: p.name.trim(),
-        label: p.name.trim() + (alias.length ? " · " + alias.join(", ") : ""),
+        // Same wording as personLabel below (this runs inside the dialog, so
+        // it cannot import it).
+        label: p.name.trim() + (alias.length ? " (also " + alias.join(", ") + ")" : ""),
       });
     }
     scored.sort(function (a, b) { return a.s - b.s || a.n - b.n || a.i - b.i; });
@@ -132,7 +157,10 @@ export function installPeopleSuggest(
     field = input;
     items = match(input.value);
     active = items.length ? 0 : -1;
-    if (!items.length) { close(); return; }
+    // No people loaded at all: say so once something is typed, rather than
+    // leave what looks like a plain box (founder smoke 2026-11-25).
+    var note = !list.length && unavailable && input.value.trim() ? unavailable : "";
+    if (!items.length && !note) { close(); return; }
     if (!box) {
       box = doc.createElement("div");
       box.setAttribute("role", "listbox");
@@ -148,6 +176,15 @@ export function installPeopleSuggest(
     box.style.top = r.bottom + (view ? view.scrollY : 0) + 2 + "px";
     box.style.width = Math.max(r.width, 160) + "px";
     box.style.display = "block";
+    if (note) {
+      while (box.firstChild) box.removeChild(box.firstChild);
+      var msg = doc.createElement("div");
+      msg.setAttribute("data-people-unavailable", "");
+      msg.textContent = note;
+      msg.style.cssText = "padding:6px 8px;color:#A0A0A0;white-space:normal";
+      box.appendChild(msg);
+      return;
+    }
     paint();
   }
 
@@ -178,8 +215,19 @@ export function installPeopleSuggest(
   return { match: match };
 }
 
-/** The script tag that installs the suggestions in a dialog, people inlined. */
-export function peopleSuggestScript(people: SuggestPerson[]): string {
+/**
+ * What a person field says when the catalogue's people could not be loaded.
+ * Copy: e1 (draft until e1 rules).
+ */
+export const PEOPLE_UNAVAILABLE =
+  "couldn't load the people in your catalogue, so nothing is suggested. type the full name: pica matches it to someone already there when you save.";
+
+/**
+ * The script tag that installs the suggestions in a dialog, people inlined.
+ * `loaded` false (the people load failed) makes an empty field say so.
+ */
+export function peopleSuggestScript(people: SuggestPerson[], loaded = true): string {
   const json = JSON.stringify(people).replace(/</g, "\\u003c");
-  return `<script>(${installPeopleSuggest.toString()})(document, ${json});</script>`;
+  const note = loaded ? "" : `, ${JSON.stringify(PEOPLE_UNAVAILABLE).replace(/</g, "\\u003c")}`;
+  return `<script>(${installPeopleSuggest.toString()})(document, ${json}${note});</script>`;
 }

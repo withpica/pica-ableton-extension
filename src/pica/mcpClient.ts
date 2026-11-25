@@ -3,6 +3,25 @@
 export interface McpClientConfig {
   baseUrl: string;
   apiKey: string;
+  /**
+   * Who this client is, for PICA's introduction gate (ADR-247). An API-key
+   * caller that has not introduced itself in the last 24 hours has every
+   * other tool refused with "identity_required". With this set, the client
+   * introduces itself and retries the refused call once. Without it, the
+   * refusal is thrown as before.
+   */
+  introduceAs?: { agent_name: string; agent_role?: string };
+}
+
+/**
+ * Whether an error is PICA's introduction gate refusing the call
+ * (app/api/mcp/lib/gates.ts buildIdentityRequiredResult: status
+ * "identity_required", reason "introduction_required").
+ */
+export function isIdentityRequired(e: unknown): boolean {
+  if (!(e instanceof PicaMcpError)) return false;
+  const d = e.data as { status?: unknown; reason?: unknown } | null | undefined;
+  return d?.status === "identity_required" || d?.reason === "introduction_required";
 }
 
 export class PicaMcpError extends Error {
@@ -64,8 +83,23 @@ export class PicaMcpClient {
     private readonly fetchFn: FetchFn = fetch,
   ) {}
 
-  /** Call an MCP tool. Returns the parsed tool result (envelope unwrapped). Throws PicaMcpError on any failure. */
+  /**
+   * Call an MCP tool. Returns the parsed tool result (envelope unwrapped).
+   * Throws PicaMcpError on any failure. A call refused because the key has not
+   * introduced itself is introduced and retried once (see `introduceAs`).
+   */
   async callTool<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
+    try {
+      return await this.callOnce<T>(name, args);
+    } catch (e) {
+      const who = this.cfg.introduceAs;
+      if (!who || name === "pica_introduce_self" || !isIdentityRequired(e)) throw e;
+      await this.callOnce("pica_introduce_self", { ...who });
+      return this.callOnce<T>(name, args);
+    }
+  }
+
+  private async callOnce<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
     const reqBody = {
       jsonrpc: "2.0",
       id: this.nextId++,

@@ -46,6 +46,7 @@ import { buildMetadata, buildSummary } from "./session/snapshot";
 import { derivePartTree } from "./session/parts";
 import {
   ensureIntroduced,
+  introductionFor,
   registerSet,
   findExistingRegistration,
   DuplicateWorkError,
@@ -74,7 +75,7 @@ import {
   type PersonCandidate,
   type EmailContact,
 } from "./pica/people";
-import { peopleSuggestScript, toSuggestPeople } from "./peopleSuggest";
+import { peopleSuggestScript, toSuggestPeople, personLabel } from "./peopleSuggest";
 import { detectSpliceSamples, saveSpliceSamples } from "./pica/samples";
 import {
   messageHtml,
@@ -100,7 +101,7 @@ import {
   type StepResult,
 } from "./dialogHtml";
 import { deliverWork, isDeliverableEmail, createWorkLink, recipientEmail } from "./pica/deliver";
-import { mapAudioQueryToStems, selectionParam } from "./pica/shareStems";
+import { mapAudioQueryToStems, selectionParam, fetchWorkAudio } from "./pica/shareStems";
 import { isAudioTrack, deriveRenderTargets, computeSongEnd, type TrackLike } from "./session/renderTargets";
 import { locatorOptions, resolveRange, type CueLike, type RangeChoice } from "./session/locatorRange";
 import { uploadRenderedStem, exceedsCap, MAX_UPLOAD_BYTES } from "./pica/audioUpload";
@@ -124,6 +125,16 @@ import {
 import { withStory } from "./progress";
 
 const BASE_URL = "https://withpica.com";
+
+/**
+ * A PICA client for this extension. It introduces itself when PICA's
+ * introduction gate refuses a call (an API key idle for over 24 hours), so a
+ * read made before a flow's own introduction is never silently refused: the
+ * people list loaded empty for exactly that reason (founder smoke 2026-11-25).
+ */
+function picaClient(apiKey: string, liveVersion = ""): PicaMcpClient {
+  return new PicaMcpClient({ baseUrl: BASE_URL, apiKey, introduceAs: introductionFor(liveVersion) });
+}
 const PANEL_W = 460;
 const PANEL_H = 520;
 const CHOICE_W = 480;
@@ -328,12 +339,14 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   // the identity resolves first; it is cached after the first run.
   const identity = await ensureIdentity(BASE_URL, storageDir, apiKey).catch(() => null);
   const ownName = identity?.fullName ?? null;
-  const [candidates, destination] = await Promise.all([
-    fetchPeopleCandidates(new PicaMcpClient({ baseUrl: BASE_URL, apiKey }), ownName).catch(
-      (): PersonCandidate[] => [],
-    ),
+  const [loadedPeople, destination] = await Promise.all([
+    fetchPeopleCandidates(picaClient(apiKey), ownName).catch((): PersonCandidate[] | null => null),
     describeConnection(storageDir, apiKey),
   ]);
+  // null: the people did not load at all. The fields then say so instead of
+  // looking like plain boxes; names still resolve when saved.
+  const peopleLoaded = loadedPeople !== null;
+  const candidates: PersonCandidate[] = loadedPeople ?? [];
 
   // 2. Confirm-and-edit panel. Title + artist are user-entered (the Set has neither).
   const prefillJson = JSON.stringify({ summary, key: derivedKey, workType: "song" }).replace(/</g, "\\u003c");
@@ -343,7 +356,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     "</head>",
     `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson}; ` +
       `window.__PICA_DESTINATION__ = ${destinationJson};</script>` +
-      peopleSuggestScript(toSuggestPeople(candidates, ownName)) +
+      peopleSuggestScript(toSuggestPeople(candidates, ownName), peopleLoaded) +
       `</head>`,
   );
   const url = `data:text/html,${encodeURIComponent(injected)}`;
@@ -362,7 +375,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   // dialog loaded (a one-word name, a band) is still found, then offer them.
   {
     const typed = answer.artistName.trim();
-    const runOnce: ClientRunner = (fn) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey }));
+    const runOnce: ClientRunner = (fn) => fn(picaClient(apiKey));
     const picked = await pickPeople(context, runOnce, [typed], candidates, "artist");
     if (!picked) return;
     const chosen = picked.get(typed);
@@ -373,7 +386,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
   }
 
   // 3. Register (declare identity → dup-check → create), with a cancellable progress dialog.
-  const client = new PicaMcpClient({ baseUrl: BASE_URL, apiKey });
+  const client = picaClient(apiKey);
   const liveVersion = hostApiVersion ? `(api ${hostApiVersion})` : "";
 
   // Hold the live key in a mutable local so one reconnect (register OR credits
@@ -386,7 +399,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
     withReconnect(
       context,
       storageDir,
-      (key: string) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key })),
+      (key: string) => fn(picaClient(key)),
       currentKey,
       (fresh) => {
         currentKey = fresh;
@@ -464,7 +477,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
         );
         const masterOwnership = await captureOwnership(recordingId);
         const spliceLogged = await captureSplice(recordingId);
-        const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, []), [], candidates);
+        const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, []), [], candidates, peopleLoaded);
         const action = await showReport(context, {
           action: "version",
           title: answer.title!,
@@ -504,7 +517,7 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
           masterOwnership = await captureOwnership(recordingId);
         }
         const spliceLogged = await captureSplice(recordingId);
-        const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, existing), existing, candidates);
+        const credits = await runCreditsFlow(context, runWithClient, recordingId, buildPrefillTree(tree, existing), existing, candidates, peopleLoaded);
         const action = await showReport(context, {
           action: "existing",
           title: answer.title!,
@@ -557,10 +570,11 @@ async function runRegister(context: ExtensionContext<"1.0.0">, hostApiVersion: s
       buildPrefillTree(tree, []),
       [],
       candidates,
+      peopleLoaded,
     ).catch((e) => ({ state: "error" as const, error: e instanceof Error ? e.message : String(e) }));
   }
 
-  const writers = await runWritersFlow(context, runWithClient, r.workId, candidates).catch(
+  const writers = await runWritersFlow(context, runWithClient, r.workId, candidates, peopleLoaded).catch(
     (e) => ({ state: "error" as const, error: e instanceof Error ? e.message : String(e) }),
   );
 
@@ -786,7 +800,7 @@ async function runSendStemsStandalone(context: ExtensionContext<"1.0.0">, hostAp
     withReconnect(
       context,
       storageDir,
-      (key: string) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key })),
+      (key: string) => fn(picaClient(key)),
       currentKey,
       (fresh) => {
         currentKey = fresh;
@@ -841,17 +855,7 @@ async function runDeliver(
   // Best-effort: any failure or empty result skips the picker (never blocks the share).
   let includedFileIds: string[] | undefined;
   try {
-    const audioRaw = await run((c) => c.callTool("pica_audio_query", { work_id: workId }));
-    const obj = audioRaw as { data?: unknown; items?: unknown } | null;
-    const rows = Array.isArray(audioRaw)
-      ? audioRaw
-      : Array.isArray(obj?.data)
-        ? (obj.data as unknown[])
-        : Array.isArray(obj?.items)
-          ? (obj.items as unknown[])
-          : [];
-    const audioRows = rows as Array<{ id: string; filename?: string; stem_label?: string | null; file_type?: string }>;
-    const stems = mapAudioQueryToStems(audioRows);
+    const stems = mapAudioQueryToStems(await run((c) => fetchWorkAudio(c, workId)));
     if (stems.length > 1) {
       const pickerRaw = await context.ui.showModalDialog(
         `data:text/html,${encodeURIComponent(shareStemsHtml(stems))}`,
@@ -990,7 +994,7 @@ async function runDeliverStandalone(context: ExtensionContext<"1.0.0">, hostApiV
     withReconnect(
       context,
       storageDir,
-      (key: string) => fn(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key })),
+      (key: string) => fn(picaClient(key)),
       currentKey,
       (fresh) => {
         currentKey = fresh;
@@ -1066,7 +1070,7 @@ async function pickPeople(
             typed,
             found.map((c) => ({
               id: c.id,
-              label: c.stageNames.length ? `${c.name} · ${c.stageNames.join(", ")}` : c.name,
+              label: personLabel(c.name, c.stageNames),
               same: fold(c.name) === fold(typed) || c.stageNames.some((st) => fold(st) === fold(typed)),
             })),
           ),
@@ -1098,13 +1102,14 @@ async function runCreditsFlow(
   prefillNodes: PrefillNode[],
   existing: ExistingCredit[],
   candidates: PersonCandidate[],
+  peopleLoaded = true,
 ): Promise<StepResult<CreditOutcome>> {
   const prefillJson = JSON.stringify({ tree: prefillNodes }).replace(/</g, "\\u003c");
   const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
   const injected = creditsHtmlFlat.replace(
     "</head>",
     `<script>window.__PICA_PREFILL__ = ${prefillJson}; window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script>` +
-      peopleSuggestScript(toSuggestPeople(candidates)) +
+      peopleSuggestScript(toSuggestPeople(candidates), peopleLoaded) +
       `</head>`,
   );
   const raw = await context.ui.showModalDialog(
@@ -1143,12 +1148,13 @@ async function runWritersFlow(
   run: ClientRunner,
   workId: string,
   candidates: PersonCandidate[],
+  peopleLoaded = true,
 ): Promise<StepResult<WriterOutcome>> {
   const namesJson = JSON.stringify(candidateNames(candidates)).replace(/</g, "\\u003c");
   const injected = writersHtmlFlat.replace(
     "</head>",
     `<script>window.__PICA_PEOPLE_NAMES__ = ${namesJson};</script>` +
-      peopleSuggestScript(toSuggestPeople(candidates)) +
+      peopleSuggestScript(toSuggestPeople(candidates), peopleLoaded) +
       `</head>`,
   );
   const raw = await context.ui.showModalDialog(
@@ -1306,7 +1312,7 @@ async function runImport(context: ExtensionContext<"1.0.0">): Promise<void> {
     withReconnect(
       context,
       storageDir,
-      (key: string) => fn(readOnly(new PicaMcpClient({ baseUrl: BASE_URL, apiKey: key }))),
+      (key: string) => fn(readOnly(picaClient(key))),
       currentKey,
       (fresh) => {
         currentKey = fresh;
