@@ -207,6 +207,7 @@ describe("the dialog's label matches personLabel (e1, 2026-11-25)", () => {
     ["Joseph Oyelade", ["Kehinde"]],
     ["Sam", []],
     ["Ana", ["", "  ", "ANA"]],
+    ["Max", ["Constructor", "toString", "__proto__"]],
   ])("%s", (name, stageNames) => {
     const { match } = installPeopleSuggest(new JSDOM("").window.document, [{ name, stageNames }]);
     expect(match(name)[0]!.label).toBe(personLabel(name, stageNames));

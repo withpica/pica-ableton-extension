@@ -98,7 +98,8 @@ export function installPeopleSuggest(
       // Shown spellings compare without folding, so "Féz" still shows beside
       // "Fez". The same rule as personLabel (pinned by a test).
       var plain = p.name.trim().toLowerCase();
-      var seenAlias: Record<string, boolean> = {};
+      // No prototype: a stage name like "constructor" is a name, not a key that is already there.
+      var seenAlias: Record<string, boolean> = Object.create(null);
       seenAlias[plain] = true;
       var alias: string[] = [];
       (p.stageNames || []).forEach(function (st) {
