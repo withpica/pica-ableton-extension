@@ -35,14 +35,18 @@ export class DuplicateWorkError extends Error {
 // do not share one client across unrelated user sessions.
 const introduced = new WeakSet<PicaMcpClient>();
 
+/** Who the extension says it is to PICA (ADR-247), for every flow. */
+export function introductionFor(liveVersion: string): { agent_name: string; agent_role: string } {
+  return {
+    agent_name: liveVersion ? `Ableton Live Extension ${liveVersion}` : "Ableton Live Extension",
+    agent_role: "DAW session capture (register-from-Set)",
+  };
+}
+
 /** Declare identity (ADR-247) once per client instance, so writes land in the /inspect live feed. */
 export async function ensureIntroduced(client: PicaMcpClient, liveVersion: string): Promise<void> {
   if (introduced.has(client)) return;
-  const agentName = liveVersion ? `Ableton Live Extension ${liveVersion}` : "Ableton Live Extension";
-  await client.callTool("pica_introduce_self", {
-    agent_name: agentName,
-    agent_role: "DAW session capture (register-from-Set)",
-  });
+  await client.callTool("pica_introduce_self", introductionFor(liveVersion));
   introduced.add(client);
 }
 

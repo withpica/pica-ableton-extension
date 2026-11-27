@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "vitest";
 import { JSDOM } from "jsdom";
-import { installPeopleSuggest, peopleSuggestScript, type SuggestPerson } from "../src/peopleSuggest";
+import { installPeopleSuggest, peopleSuggestScript, personLabel, PEOPLE_UNAVAILABLE, type SuggestPerson } from "../src/peopleSuggest";
 import { readFileSync } from "node:fs";
 
 const creditsHtml = readFileSync(new URL("../ui/credits.html", import.meta.url), "utf8");
@@ -68,7 +68,7 @@ describe("installPeopleSuggest: matching", () => {
 
   it("shows the stage name beside the name, but fills the name", () => {
     expect(match("soundslike")).toEqual([
-      { name: "Fez", label: "Fez · Féz, SoundsLikeFez" },
+      { name: "Fez", label: "Fez (also Féz, SoundsLikeFez)" },
     ]);
   });
 
@@ -89,7 +89,7 @@ describe("the injected script in a dialog", () => {
   it("enter picks the highlighted suggestion; arrows move the highlight", () => {
     const d = dialog();
     d.type("jo");
-    expect(d.shown()).toEqual(["Jo Bloggs", "Joseph Oyelade · Kehinde"]);
+    expect(d.shown()).toEqual(["Jo Bloggs", "Joseph Oyelade (also Kehinde)"]);
     d.key("ArrowDown");
     d.key("Enter");
     expect(d.who.value).toBe("Joseph Oyelade");
@@ -160,5 +160,56 @@ describe("toSuggestPeople with the account's own name", () => {
     expect(toSuggestPeople(c, "Féz")).toHaveLength(1);
     expect(toSuggestPeople(c, null)).toHaveLength(1);
     expect(toSuggestPeople(c, "  ")).toHaveLength(1);
+  });
+});
+
+// Founder smoke 2026-11-25: the people did not load, and the fields read as
+// plain boxes with nothing said.
+describe("peopleSuggestScript: when the people did not load", () => {
+  function emptyDialog(loaded: boolean) {
+    const html =
+      `<!doctype html><html><head>${peopleSuggestScript([], loaded)}</head>` +
+      `<body><input id="who" list="people"></body></html>`;
+    const dom = new JSDOM(html, { runScripts: "dangerously" });
+    const doc = dom.window.document;
+    const who = doc.getElementById("who") as HTMLInputElement;
+    who.dispatchEvent(new dom.window.FocusEvent("focusin", { bubbles: true }));
+    who.value = "fe";
+    who.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    return doc;
+  }
+
+  it("says so under the field once something is typed, and offers nothing to pick", () => {
+    const doc = emptyDialog(false);
+    expect(doc.querySelector("[data-people-unavailable]")?.textContent).toBe(PEOPLE_UNAVAILABLE);
+    expect(doc.querySelectorAll("[role=option]")).toHaveLength(0);
+  });
+
+  it("says nothing when the load worked and the catalogue is simply empty", () => {
+    expect(emptyDialog(true).querySelector("[data-people-unavailable]")).toBeNull();
+  });
+});
+
+describe("personLabel", () => {
+  it("drops another name that only repeats the name, and keeps an accented spelling", () => {
+    expect(personLabel("Fez", ["Féz", "Fez", "fez", "Feranmi Oguns", "Feach"])).toBe(
+      "Fez (also Féz, Feranmi Oguns, Feach)",
+    );
+  });
+  it("is just the name when there are no other names", () => {
+    expect(personLabel(" Sam ", [" ", "sam"])).toBe("Sam");
+  });
+});
+
+describe("the dialog's label matches personLabel (e1, 2026-11-25)", () => {
+  it.each([
+    ["Fez", ["Féz", "Fez", "fez", " Feranmi Oguns ", "Feach", "feach"]],
+    ["Joseph Oyelade", ["Kehinde"]],
+    ["Sam", []],
+    ["Ana", ["", "  ", "ANA"]],
+    ["Max", ["Constructor", "toString", "__proto__"]],
+  ])("%s", (name, stageNames) => {
+    const { match } = installPeopleSuggest(new JSDOM("").window.document, [{ name, stageNames }]);
+    expect(match(name)[0]!.label).toBe(personLabel(name, stageNames));
   });
 });

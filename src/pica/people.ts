@@ -1,6 +1,7 @@
 // Copyright (c) 2024-2026 Withpica Ltd. All rights reserved.
 
 import { type PicaMcpClient } from "./mcpClient";
+import { loadAllPages } from "./paging";
 
 /** An existing org person the credit/writer dialogs can suggest. */
 export interface PersonCandidate {
@@ -13,8 +14,13 @@ function norm(s: string): string {
   return s.trim().toLowerCase();
 }
 
-/** pica_people_query's limit maximum is 500 (mcp-server/src/tools/people.ts). */
-const PEOPLE_PAGE = 500;
+/**
+ * One page of pica_people_query. Its maximum is 500, but PICA trims any answer
+ * over 100KB to the people that fit (about 60 full rows), so asking for 500
+ * fetched rows only to drop most of them. 100 keeps each call cheap; the
+ * pages are followed by has_more / next_offset (./paging.ts).
+ */
+const PEOPLE_PAGE = 100;
 /** A safety cap on what one dialog loads; a catalogue past it loses the rest. */
 const PEOPLE_CAP = 5000;
 
@@ -120,13 +126,15 @@ export async function fetchPeopleCandidates(
       /* best-effort: the full list below still loads */
     }
   }
-  for (let offset = 0; offset < PEOPLE_CAP; offset += PEOPLE_PAGE) {
-    const raw = await client.callTool("pica_people_query", { limit: PEOPLE_PAGE, offset });
-    all.push(...toPersonCandidates(raw));
-    // Count the rows PICA sent, not the ones kept: a dropped row (no name)
-    // made a full page look short and stopped the paging early.
-    if (rowsOfPeople(raw).length < PEOPLE_PAGE) break;
-  }
+  // Every page, followed by has_more / next_offset: a page PICA trimmed is
+  // short but not the last (the old loop stopped there). The first page
+  // failing throws, so the caller's reconnect can retry; a later one keeps
+  // what loaded.
+  const loaded = await loadAllPages(client, "pica_people_query", {}, toPersonCandidates, {
+    pageSize: PEOPLE_PAGE,
+    cap: PEOPLE_CAP,
+  });
+  all.push(...loaded.rows);
   const seen = new Set<string>();
   return all.filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
 }
@@ -170,13 +178,12 @@ export function toEmailContacts(raw: unknown): EmailContact[] {
  * back to a plain email field. Paginated with the same cap as the typeahead.
  */
 export async function fetchEmailContacts(client: PicaMcpClient): Promise<EmailContact[]> {
-  const all: EmailContact[] = [];
-  for (let offset = 0; offset < PEOPLE_CAP; offset += PEOPLE_PAGE) {
-    const raw = await client.callTool("pica_people_query", { has_email: true, limit: PEOPLE_PAGE, offset });
-    const rows = rowsOfPeople(raw);
-    all.push(...toEmailContacts(rows));
-    if (rows.length < PEOPLE_PAGE) break;
-  }
+  const all = (
+    await loadAllPages(client, "pica_people_query", { has_email: true }, toEmailContacts, {
+      pageSize: PEOPLE_PAGE,
+      cap: PEOPLE_CAP,
+    })
+  ).rows;
   const seen = new Set<string>();
   return all.filter((c) => {
     const k = c.email.toLowerCase();

@@ -136,3 +136,58 @@ describe("PicaMcpClient.callTool", () => {
     await expect(client.callTool("pica_works_query", {})).rejects.toBeInstanceOf(PicaMcpError);
   });
 });
+
+describe("PicaMcpClient introduction gate (founder smoke 2026-11-25)", () => {
+  const ok = (id: number, body: unknown) => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ jsonrpc: "2.0", id, result: { isError: false, content: [{ type: "text", text: JSON.stringify(body) }], structuredContent: body } }),
+  });
+  // app/api/mcp/lib/gates.ts buildIdentityRequiredResult
+  const refused = (id: number) => ({
+    ok: true,
+    status: 200,
+    text: async () =>
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          isError: true,
+          content: [{ type: "text", text: JSON.stringify({ status: "identity_required", reason: "introduction_required", next_tool: "pica_introduce_self" }) }],
+        },
+      }),
+  });
+  const toolOf = (call: unknown[]) => JSON.parse((call[1] as { body: string }).body).params.name;
+
+  it("introduces itself and retries a call the gate refused, once", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(refused(1))
+      .mockResolvedValueOnce(ok(2, { declared: true }))
+      .mockResolvedValueOnce(ok(3, { count: 1, items: [{ id: "p1", name: "Sam" }] }));
+    const client = new PicaMcpClient(
+      { baseUrl: "https://withpica.com", apiKey: "k", introduceAs: { agent_name: "Ableton Live Extension" } },
+      fetchMock as unknown as typeof fetch,
+    );
+    const out = (await client.callTool("pica_people_query", { limit: 100 })) as { items: unknown[] };
+    expect(out.items).toHaveLength(1);
+    expect(fetchMock.mock.calls.map(toolOf)).toEqual(["pica_people_query", "pica_introduce_self", "pica_people_query"]);
+  });
+
+  it("without introduceAs, the refusal is thrown as before", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(refused(1));
+    const client = new PicaMcpClient({ baseUrl: "https://withpica.com", apiKey: "k" }, fetchMock as unknown as typeof fetch);
+    await expect(client.callTool("pica_people_query", {})).rejects.toBeInstanceOf(PicaMcpError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not loop when the gate refuses again after the introduction", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(refused(1)).mockResolvedValueOnce(ok(2, {})).mockResolvedValueOnce(refused(3));
+    const client = new PicaMcpClient(
+      { baseUrl: "https://withpica.com", apiKey: "k", introduceAs: { agent_name: "x" } },
+      fetchMock as unknown as typeof fetch,
+    );
+    await expect(client.callTool("pica_people_query", {})).rejects.toBeInstanceOf(PicaMcpError);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
